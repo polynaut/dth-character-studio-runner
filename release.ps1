@@ -13,7 +13,14 @@
 # refuses to run on a dirty tree or an already-released version.
 
 param(
-    [string]$Sdk6Dir = "D:\DAZ 3D\My DAZ 3D Library\Daz Studio 6.25+ BETA SDK Latest",
+    # DS6 plugins must be built against an SDK NO NEWER than the oldest Daz
+    # Studio 6 the release should load in: the plugin's dzcore imports come
+    # from the SDK's import lib, and a Studio older than the SDK is missing
+    # those exports - the DLL then fails to load ("could not locate the
+    # getSDKVersion() function" in the Daz log). v1.0.0 shipped built against
+    # the "Latest" SDK (6.25.2026.19400) and would not load in DS 6.25.2026.14722.
+    # So: release against the OLDEST supported 6.25 SDK, never "Latest".
+    [string]$Sdk6Dir = "D:\DAZ 3D\My DAZ 3D Library\Daz Studio 6.25+ BETA SDK",
     [string]$Sdk4Dir = "D:\DAZ 3D\My DAZ 3D Library\DAZStudio4.5+ SDK",
     [string]$QtDir = "C:\Qt\6.10.3\msvc2022_64",
     [switch]$Draft

@@ -102,6 +102,7 @@ add_library(dthcharacterstudiorunner SHARED
 	src/CsvJobFile.cpp
 	src/CsvJobFile.h
 	src/version.h
+	src/version.rc
 )
 target_include_directories(dthcharacterstudiorunner PRIVATE src)
 target_link_libraries(dthcharacterstudiorunner PRIVATE dzcore ${DZSDK_QT_TARGETS})

@@ -1,0 +1,29 @@
+// Windows VERSIONINFO resource: DTH Character Studio reads the DLL's
+// VS_FIXEDFILEINFO to display the installed/bundled Runner version in its
+// Settings panel. Numeric type literals on purpose (1 = VS_VERSION_INFO,
+// 0x40004 = VOS_NT_WINDOWS32, 0x2 = VFT_DLL) so no winres header is needed.
+#include "version.h"
+
+1 VERSIONINFO
+FILEVERSION PLUGIN_MAJOR,PLUGIN_MINOR,PLUGIN_REV,PLUGIN_BUILD
+PRODUCTVERSION PLUGIN_MAJOR,PLUGIN_MINOR,PLUGIN_REV,PLUGIN_BUILD
+FILEOS 0x40004L
+FILETYPE 0x2L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "polynaut"
+            VALUE "FileDescription", "DTH Character Studio Runner - Daz Studio plugin"
+            VALUE "FileVersion", PLUGIN_VERSION_STRING
+            VALUE "ProductName", "DTH Character Studio Runner"
+            VALUE "ProductVersion", PLUGIN_VERSION_STRING
+            VALUE "LegalCopyright", "MIT (c) polynaut"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
