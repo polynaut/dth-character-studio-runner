@@ -30,6 +30,20 @@ View Log File) with the prefix `[DTH JobRunner]`. A manual trigger is
 registered as the action **"DTH Job Runner: Check for Jobs Now"**
 (add it to a menu/toolbar via Window → Workspace → Customize).
 
+## Install from a release
+
+Grab the zip for your Daz Studio from the
+[Releases page](https://github.com/polynaut/dth-job-runner/releases):
+
+- **Daz Studio 6.25+**: `dth-job-runner-<version>-ds6.zip` → copy
+  `dsp_dthjobrunner.dll` into `<DAZStudio6>\plugins\` (admin rights; keep the
+  `dsp_` name — DS6 only loads plugins named `dsp_*.dll`)
+- **Daz Studio 4.x**: `dth-job-runner-<version>-ds4.zip` → copy
+  `dthjobrunner.dll` into `<DAZStudio4>\plugins\`
+
+Restart Daz Studio and verify under Help → About Installed Plugins. The
+`.pdb` in the zip is optional (crash symbols only).
+
 ## Requirements
 
 - Windows, 64-bit
@@ -95,7 +109,22 @@ Daz Studio 4 plugins carry no prefix. The build sets this automatically.
   startup is the plugin's startup hook, and it doubles as the manual trigger.
 - `src/pluginmain.cpp` — `DZ_PLUGIN_*` definition and class GUID.
 
-Caveats:
+### Releasing
+
+Releases are **built locally** — the Daz SDKs are store downloads that cannot
+exist on CI runners, so GitHub Actions only guards the parser tests. To cut a
+release:
+
+1. Bump the version in `src/version.h` and commit.
+2. Run `.\release.ps1` (parameters default to this machine's SDK/Qt paths;
+   add `-Draft` for a draft release).
+
+The script builds both variants, runs the tests, tags `v<version>`, pushes
+the tag, and publishes a GitHub release carrying
+`dth-job-runner-<version>-ds6.zip` and `dth-job-runner-<version>-ds4.zip`.
+It refuses to run on a dirty tree or an already-released version.
+
+### Caveats
 
 - The Daz Studio 6 SDK is **beta** — a rebuild against the final SDK may be
   required when it goes GA.
