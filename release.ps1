@@ -1,6 +1,6 @@
 # Cut a versioned release: build both SDK variants, tag, and publish a
-# GitHub release with the two DLLs (zipped so the required install names —
-# dsp_dthjobrunner.dll for DS6, dthjobrunner.dll for DS4 — stay intact).
+# GitHub release with the two DLLs (zipped so the required install names -
+# dsp_dthjobrunner.dll for DS6, dthjobrunner.dll for DS4 - stay intact).
 #
 # Releases are built LOCALLY because the Daz SDKs are store downloads that
 # cannot exist on CI runners. GitHub Actions only guards the parser tests.
@@ -21,7 +21,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ── Version from src/version.h ───────────────────────────────────────────────
+# -- Version from src/version.h -----------------------------------------------
 $versionHeader = Get-Content src\version.h -Raw
 $major = [regex]::Match($versionHeader, '#define PLUGIN_MAJOR\s+(\d+)').Groups[1].Value
 $minor = [regex]::Match($versionHeader, '#define PLUGIN_MINOR\s+(\d+)').Groups[1].Value
@@ -30,19 +30,19 @@ if (-not $major -or -not $minor -or -not $rev) { throw "could not parse src/vers
 $version = "$major.$minor.$rev"
 $tag = "v$version"
 
-# ── Preconditions ────────────────────────────────────────────────────────────
+# -- Preconditions ------------------------------------------------------------
 git diff --quiet
-if ($LASTEXITCODE -ne 0) { throw "working tree is dirty — commit first" }
+if ($LASTEXITCODE -ne 0) { throw "working tree is dirty - commit first" }
 git diff --cached --quiet
-if ($LASTEXITCODE -ne 0) { throw "index has staged changes — commit first" }
+if ($LASTEXITCODE -ne 0) { throw "index has staged changes - commit first" }
 git rev-parse -q --verify "refs/tags/$tag" *> $null
-if ($LASTEXITCODE -eq 0) { throw "tag $tag already exists — bump src/version.h first" }
+if ($LASTEXITCODE -eq 0) { throw "tag $tag already exists - bump src/version.h first" }
 
-# ── Build both variants (each also runs the parser tests) ────────────────────
+# -- Build both variants (each also runs the parser tests) --------------------
 .\build.ps1 -SdkDir $Sdk6Dir -SdkVersion 6 -QtDir $QtDir
 .\build.ps1 -SdkDir $Sdk4Dir -SdkVersion 4
 
-# ── Stage versioned artifacts ────────────────────────────────────────────────
+# -- Stage versioned artifacts ------------------------------------------------
 $stage = "build-release\$tag"
 New-Item -ItemType Directory -Force $stage | Out-Null
 
@@ -53,14 +53,14 @@ Compress-Archive -Force -DestinationPath $ds6Zip -Path `
 Compress-Archive -Force -DestinationPath $ds4Zip -Path `
     "build-sdk4\Release\dthjobrunner.dll", "build-sdk4\Release\dthjobrunner.pdb"
 
-# ── Tag + GitHub release ─────────────────────────────────────────────────────
+# -- Tag + GitHub release -----------------------------------------------------
 git tag $tag
 if ($LASTEXITCODE -ne 0) { throw "git tag failed" }
 git push origin $tag
 if ($LASTEXITCODE -ne 0) { throw "git push failed" }
 
 $notes = @"
-DTH Job Runner $version — Daz Studio plugin builds.
+DTH Job Runner $version - Daz Studio plugin builds.
 
 | File | Daz Studio | Install to |
 | --- | --- | --- |
