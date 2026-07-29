@@ -47,7 +47,13 @@ else()
 	set(DAZ_SDK_LIB_DIR "${DAZ_SDK_DIR}/lib/${DZ_PLATFORM}")
 endif()
 
-set(DAZ_SDK_INCLUDE "${DAZ_SDK_DIR}/include" CACHE PATH "Path to DAZ SDK includes")
+# Plain variable ON PURPOSE (not CACHE): `set(... CACHE)` never overwrites an
+# existing cache entry, so a cached include path would silently keep compiling
+# against a PREVIOUS -DDAZ_SDK_DIR's headers after a reconfigure — that shipped
+# v1.0.2 with the "Latest" SDK's DZ_SDK_VERSION (19400) despite pointing
+# DAZ_SDK_DIR at the older SDK, and Daz rejected it ("requires a newer version
+# of Daz Studio", plugin SDK > studio build).
+set(DAZ_SDK_INCLUDE "${DAZ_SDK_DIR}/include")
 set(DAZ_SDK_CORE_LIB "${DAZ_SDK_LIB_DIR}/dzcore.lib")
 if(NOT EXISTS "${DAZ_SDK_CORE_LIB}")
 	message(FATAL_ERROR "dzcore.lib not found at ${DAZ_SDK_CORE_LIB} — check DAZ_SDK_DIR/DAZ_SDK_VERSION")
