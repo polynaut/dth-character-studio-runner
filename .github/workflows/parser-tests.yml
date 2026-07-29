@@ -1,0 +1,22 @@
+name: parser-tests
+
+# The plugin itself cannot build in CI — both Daz SDKs are store downloads.
+# The pure CSV job-file parser has no Qt/SDK dependency, so it builds and
+# runs everywhere; that is what this workflow verifies.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (parser tests only — no DAZ_SDK_DIR)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
