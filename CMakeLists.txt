@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(DthJobRunner CXX)
+project(DthCharacterStudioRunner CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -93,7 +93,7 @@ endif()
 
 set(CMAKE_AUTOMOC ON)
 
-add_library(dthjobrunner SHARED
+add_library(dthcharacterstudiorunner SHARED
 	src/pluginmain.cpp
 	src/JobPoller.cpp
 	src/JobPoller.h
@@ -103,24 +103,24 @@ add_library(dthjobrunner SHARED
 	src/CsvJobFile.h
 	src/version.h
 )
-target_include_directories(dthjobrunner PRIVATE src)
-target_link_libraries(dthjobrunner PRIVATE dzcore ${DZSDK_QT_TARGETS})
-target_compile_definitions(dthjobrunner PRIVATE DAZ_SDK_MAJOR_VERSION=${DAZ_SDK_VERSION})
+target_include_directories(dthcharacterstudiorunner PRIVATE src)
+target_link_libraries(dthcharacterstudiorunner PRIVATE dzcore ${DZSDK_QT_TARGETS})
+target_compile_definitions(dthcharacterstudiorunner PRIVATE DAZ_SDK_MAJOR_VERSION=${DAZ_SDK_VERSION})
 
 # PDBs in every config so crashes in Daz resolve to symbols.
-target_compile_options(dthjobrunner PRIVATE /Zi)
-target_link_options(dthjobrunner PRIVATE /DEBUG /OPT:REF /OPT:ICF)
+target_compile_options(dthcharacterstudiorunner PRIVATE /Zi)
+target_link_options(dthcharacterstudiorunner PRIVATE /DEBUG /OPT:REF /OPT:ICF)
 
 if(DAZ_SDK_VERSION STREQUAL "6")
-	target_link_libraries(dthjobrunner PRIVATE dzsdkmemory)
+	target_link_libraries(dthcharacterstudiorunner PRIVATE dzsdkmemory)
 	# DS6's plugin scanner only loads DLLs named dsp_* — without the prefix
 	# the DLL is silently skipped at startup. DS4 has no such requirement.
-	set(JOBRUNNER_OUTPUT_NAME "dsp_dthjobrunner")
+	set(JOBRUNNER_OUTPUT_NAME "dsp_dthcharacterstudiorunner")
 else()
-	set(JOBRUNNER_OUTPUT_NAME "dthjobrunner")
+	set(JOBRUNNER_OUTPUT_NAME "dthcharacterstudiorunner")
 endif()
 
-set_target_properties(dthjobrunner PROPERTIES
+set_target_properties(dthcharacterstudiorunner PROPERTIES
 	OUTPUT_NAME "${JOBRUNNER_OUTPUT_NAME}"
 	PREFIX ""
 )

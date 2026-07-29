@@ -1,6 +1,6 @@
 # Cut a versioned release: build both SDK variants, tag, and publish a
 # GitHub release with the two DLLs (zipped so the required install names -
-# dsp_dthjobrunner.dll for DS6, dthjobrunner.dll for DS4 - stay intact).
+# dsp_dthcharacterstudiorunner.dll for DS6, dthcharacterstudiorunner.dll for DS4 - stay intact).
 #
 # Releases are built LOCALLY because the Daz SDKs are store downloads that
 # cannot exist on CI runners. GitHub Actions only guards the parser tests.
@@ -46,12 +46,12 @@ if ($LASTEXITCODE -eq 0) { throw "tag $tag already exists - bump src/version.h f
 $stage = "build-release\$tag"
 New-Item -ItemType Directory -Force $stage | Out-Null
 
-$ds6Zip = "$stage\dth-job-runner-$version-ds6.zip"
-$ds4Zip = "$stage\dth-job-runner-$version-ds4.zip"
+$ds6Zip = "$stage\dth-character-studio-runner-$version-ds6.zip"
+$ds4Zip = "$stage\dth-character-studio-runner-$version-ds4.zip"
 Compress-Archive -Force -DestinationPath $ds6Zip -Path `
-    "build-sdk6\Release\dsp_dthjobrunner.dll", "build-sdk6\Release\dsp_dthjobrunner.pdb"
+    "build-sdk6\Release\dsp_dthcharacterstudiorunner.dll", "build-sdk6\Release\dsp_dthcharacterstudiorunner.pdb"
 Compress-Archive -Force -DestinationPath $ds4Zip -Path `
-    "build-sdk4\Release\dthjobrunner.dll", "build-sdk4\Release\dthjobrunner.pdb"
+    "build-sdk4\Release\dthcharacterstudiorunner.dll", "build-sdk4\Release\dthcharacterstudiorunner.pdb"
 
 # -- Tag + GitHub release -----------------------------------------------------
 git tag $tag
@@ -60,12 +60,12 @@ git push origin $tag
 if ($LASTEXITCODE -ne 0) { throw "git push failed" }
 
 $notes = @"
-DTH Job Runner $version - Daz Studio plugin builds.
+DTH Character Studio Runner $version - Daz Studio plugin builds.
 
 | File | Daz Studio | Install to |
 | --- | --- | --- |
-| ``dth-job-runner-$version-ds6.zip`` | 6.25+ | ``<DAZStudio6>\plugins\`` (keep the name ``dsp_dthjobrunner.dll``) |
-| ``dth-job-runner-$version-ds4.zip`` | 4.x | ``<DAZStudio4>\plugins\`` (keep the name ``dthjobrunner.dll``) |
+| ``dth-character-studio-runner-$version-ds6.zip`` | 6.25+ | ``<DAZStudio6>\plugins\`` (keep the name ``dsp_dthcharacterstudiorunner.dll``) |
+| ``dth-character-studio-runner-$version-ds4.zip`` | 4.x | ``<DAZStudio4>\plugins\`` (keep the name ``dthcharacterstudiorunner.dll``) |
 
 Unzip, copy the DLL into the plugins folder of the matching Daz Studio
 (admin rights required), restart Daz Studio, then verify under
@@ -74,7 +74,7 @@ Help > About Installed Plugins. The PDB is optional (crash symbols).
 Built against: Daz Studio 6.25 BETA SDK + Qt 6.10.3 (DS6), DAZ Studio 4.5+ SDK (DS4).
 "@
 
-$releaseArgs = @($tag, $ds6Zip, $ds4Zip, "--title", "DTH Job Runner $version", "--notes", $notes)
+$releaseArgs = @($tag, $ds6Zip, $ds4Zip, "--title", "DTH Character Studio Runner $version", "--notes", $notes)
 if ($Draft) { $releaseArgs += "--draft" }
 gh release create @releaseArgs
 if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }

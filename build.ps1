@@ -1,4 +1,4 @@
-# Configure + build the DTH Job Runner plugin (or just the parser tests).
+# Configure + build the DTH Character Studio Runner plugin (or just the parser tests).
 #
 # Examples:
 #   .\build.ps1 -TestsOnly
@@ -51,7 +51,7 @@ if ($Install -and -not $TestsOnly) {
     if (-not $DazStudioDir) {
         $DazStudioDir = if ($SdkVersion -eq "6") { "C:\Program Files\DAZ 3D\DAZStudio6" } else { "C:\Program Files\DAZ 3D\DAZStudio4" }
     }
-    $dllName = if ($SdkVersion -eq "6") { "dsp_dthjobrunner.dll" } else { "dthjobrunner.dll" }
+    $dllName = if ($SdkVersion -eq "6") { "dsp_dthcharacterstudiorunner.dll" } else { "dthcharacterstudiorunner.dll" }
     $src = Join-Path $buildDir "Release\$dllName"
     $dst = Join-Path $DazStudioDir "plugins"
     Copy-Item $src $dst -Force

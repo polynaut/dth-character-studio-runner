@@ -5,7 +5,7 @@
 #include "JobRunnerAction.h"
 #include "version.h"
 
-DZ_PLUGIN_DEFINITION("DTH Job Runner");
+DZ_PLUGIN_DEFINITION("DTH Character Studio Runner");
 
 DZ_PLUGIN_AUTHOR("polynaut");
 

@@ -1,4 +1,4 @@
-# DTH Job Runner
+# DTH Character Studio Runner
 
 A Daz Studio C++ plugin that runs [DTH Character Studio](https://github.com/polynaut/dth-character-studio)
 export batches unattended. The studio writes a small CSV job file; this plugin
@@ -26,20 +26,20 @@ The normative contract lives in the studio repo:
   working state; the plugin ends every batch on a fresh empty scene.
 
 All activity is logged to the Daz Studio log (Help → Troubleshooting →
-View Log File) with the prefix `[DTH JobRunner]`. A manual trigger is
-registered as the action **"DTH Job Runner: Check for Jobs Now"**
+View Log File) with the prefix `[DTH Character Studio Runner]`. A manual trigger is
+registered as the action **"DTH Character Studio Runner: Check for Jobs Now"**
 (add it to a menu/toolbar via Window → Workspace → Customize).
 
 ## Install from a release
 
 Grab the zip for your Daz Studio from the
-[Releases page](https://github.com/polynaut/dth-job-runner/releases):
+[Releases page](https://github.com/polynaut/dth-character-studio-runner/releases):
 
-- **Daz Studio 6.25+**: `dth-job-runner-<version>-ds6.zip` → copy
-  `dsp_dthjobrunner.dll` into `<DAZStudio6>\plugins\` (admin rights; keep the
+- **Daz Studio 6.25+**: `dth-character-studio-runner-<version>-ds6.zip` → copy
+  `dsp_dthcharacterstudiorunner.dll` into `<DAZStudio6>\plugins\` (admin rights; keep the
   `dsp_` name — DS6 only loads plugins named `dsp_*.dll`)
-- **Daz Studio 4.x**: `dth-job-runner-<version>-ds4.zip` → copy
-  `dthjobrunner.dll` into `<DAZStudio4>\plugins\`
+- **Daz Studio 4.x**: `dth-character-studio-runner-<version>-ds4.zip` → copy
+  `dthcharacterstudiorunner.dll` into `<DAZStudio4>\plugins\`
 
 Restart Daz Studio and verify under Help → About Installed Plugins. The
 `.pdb` in the zip is optional (crash symbols only).
@@ -71,10 +71,10 @@ is needed at build time only.
 # parser tests only (no SDK needed) — same thing CI runs
 .\build.ps1 -TestsOnly
 
-# Daz Studio 6 plugin  →  build-sdk6\Release\dsp_dthjobrunner.dll
+# Daz Studio 6 plugin  →  build-sdk6\Release\dsp_dthcharacterstudiorunner.dll
 .\build.ps1 -SdkDir "<path to Daz Studio 6.x SDK>" -QtDir C:\Qt\6.10.3\msvc2022_64
 
-# Daz Studio 4 plugin  →  build-sdk4\Release\dthjobrunner.dll
+# Daz Studio 4 plugin  →  build-sdk4\Release\dthcharacterstudiorunner.dll
 .\build.ps1 -SdkDir "<path to DAZStudio4.5+ SDK>" -SdkVersion 4
 ```
 
@@ -90,8 +90,8 @@ Daz Studio 4 plugins carry no prefix. The build sets this automatically.
 
 ## Verify it loaded
 
-1. Start Daz Studio → Help → About Installed Plugins → "DTH Job Runner".
-2. The log shows `[DTH JobRunner] watching content directories for
+1. Start Daz Studio → Help → About Installed Plugins → "DTH Character Studio Runner".
+2. The log shows `[DTH Character Studio Runner] watching content directories for
    /Scripts/DTH-Character-Studio/dth_exporter_jobs.csv (every 5 s)`.
 3. Drop a hand-written job file into
    `<My DAZ 3D Library>\Scripts\DTH-Character-Studio\` pointing at a trivial
@@ -121,7 +121,7 @@ release:
 
 The script builds both variants, runs the tests, tags `v<version>`, pushes
 the tag, and publishes a GitHub release carrying
-`dth-job-runner-<version>-ds6.zip` and `dth-job-runner-<version>-ds4.zip`.
+`dth-character-studio-runner-<version>-ds6.zip` and `dth-character-studio-runner-<version>-ds4.zip`.
 It refuses to run on a dirty tree or an already-released version.
 
 ### Caveats

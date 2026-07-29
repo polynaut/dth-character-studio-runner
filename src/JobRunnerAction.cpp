@@ -2,7 +2,7 @@
 #include "JobPoller.h"
 
 DzJobRunnerAction::DzJobRunnerAction()
-    : DzAction(tr("DTH Job Runner: Check for Jobs Now"),
+    : DzAction(tr("DTH Character Studio Runner: Check for Jobs Now"),
                tr("Immediately check all mapped content directories for a DTH exporter job file."))
 {
     JobPoller::instance().start();

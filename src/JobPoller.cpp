@@ -18,7 +18,7 @@ const int kPollIntervalMs = 5000;
 const int kSettleMs = 500;        // event-loop drain between scene open and script run
 
 const char *const kJobFileRelPath = "/Scripts/DTH-Character-Studio/dth_exporter_jobs.csv";
-const char *const kLogPrefix = "[DTH JobRunner] ";
+const char *const kLogPrefix = "[DTH Character Studio Runner] ";
 
 void disposeScript(DzScript *script)
 {
