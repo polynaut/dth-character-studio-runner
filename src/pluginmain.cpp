@@ -1,5 +1,6 @@
 #include <dzplugin.h>
 #include <dzapp.h>
+#include <dzversion.h> // DZ_SDK_VERSION, referenced by DZ_PLUGIN_DEFINITION
 
 #include "JobRunnerAction.h"
 #include "version.h"

@@ -20,6 +20,15 @@ const int kSettleMs = 500;        // event-loop drain between scene open and scr
 const char *const kJobFileRelPath = "/Scripts/DTH-Character-Studio/dth_exporter_jobs.csv";
 const char *const kLogPrefix = "[DTH JobRunner] ";
 
+void disposeScript(DzScript *script)
+{
+#if DAZ_SDK_MAJOR_VERSION >= 6
+    script->unref(); // SDK6: DzScript is ref-counted, destructor is protected
+#else
+    delete script;   // SDK4: plain public virtual destructor
+#endif
+}
+
 } // namespace
 
 JobPoller &JobPoller::instance()
@@ -198,10 +207,14 @@ void JobPoller::stepExecute()
         return;
     }
 
-    DzScript script;
-    if (!script.loadFromFile(job.scriptPath)) {
+    DzScript *script = new DzScript;
+#if DAZ_SDK_MAJOR_VERSION >= 6
+    script->ref();
+#endif
+    if (!script->loadFromFile(job.scriptPath)) {
         log(QString("row %1/%2 skipped: could not load script: %3")
                 .arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
+        disposeScript(script);
         advanceRow();
         return;
     }
@@ -209,7 +222,8 @@ void JobPoller::stepExecute()
     QVariantList args;
     args << QString("bulk-export");
     log(QString("row %1/%2: running %3").arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
-    const bool ok = script.execute(args); // synchronous; returns when the ROM + export are done
+    const bool ok = script->execute(args); // synchronous; returns when the ROM + export are done
+    disposeScript(script);
     log(QString("row %1/%2: %3").arg(m_index + 1).arg(m_queue.size()).arg(ok ? "done" : "script reported failure"));
 
     advanceRow();
@@ -238,9 +252,9 @@ void JobPoller::finishBatch()
 
 void JobPoller::newEmptyScene()
 {
-    // VERIFY-AT-BUILD: confirm against the SDK headers (dzscene.h) that
-    // clear() is the File > New equivalent and that it resets the scene
-    // modified flag. If it does not, add the SDK's mark-clean call here so
-    // quitting Daz never prompts to save.
+    // DzScene::clear() is the File > New equivalent (dzscene.h, Q_SLOT).
+    // The SDK exposes no scene dirty-flag API, so clear() is also our only
+    // means of ensuring quitting Daz never prompts to save — verified by the
+    // end-to-end smoke test.
     dzScene->clear();
 }

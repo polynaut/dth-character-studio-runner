@@ -92,7 +92,6 @@ else()
 endif()
 
 set(CMAKE_AUTOMOC ON)
-list(APPEND CMAKE_AUTOMOC_MOC_OPTIONS -i)
 
 add_library(dthjobrunner SHARED
 	src/pluginmain.cpp
