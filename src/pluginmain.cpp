@@ -5,6 +5,22 @@
 #include "JobRunnerAction.h"
 #include "version.h"
 
+// Daz Studio resolves a plugin's entry points by their PLAIN C names —
+// GetProcAddress("getSDKVersion") / ("getPluginDefinition") — on DS4 AND DS6
+// (measured: dzcore.dll's lookup strings, and the export tables of every
+// working plugin, Daz's own and the DTH Exporter alike). The SDK's Windows
+// DZ_PLUGIN_DEFINITION macro, however, defines both WITHOUT extern "C", which
+// exports C++-mangled names the loader cannot find — the plugin then fails at
+// startup with "load failed - could not locate the getSDKVersion() function".
+// Declaring them extern "C" BEFORE the macro makes the macro's definitions
+// inherit C linkage (linkage comes from the first declaration), so the DLL
+// exports the plain names Daz looks up. (MSVC warns C4190 about the UDT
+// return type crossing C linkage; both sides are the same MSVC C++ ABI.)
+extern "C" {
+	__declspec(dllexport) DzVersion getSDKVersion();
+	__declspec(dllexport) DzPlugin* getPluginDefinition();
+}
+
 DZ_PLUGIN_DEFINITION("DTH Character Studio Runner");
 
 DZ_PLUGIN_AUTHOR("polynaut");

@@ -51,13 +51,15 @@ Restart Daz Studio and verify under Help → About Installed Plugins. The
 - **Visual Studio 2022** (Build Tools are enough — MSVC v143 + Windows SDK)
 - The matching **Daz Studio SDK** (free store products, installed via
   Daz Install Manager):
-  - *Daz Studio 6.x SDK* (beta) for the DS6 build — build **against an SDK no
-    newer than the oldest Daz Studio 6 the DLL should load in**: the SDK's
-    import lib pins dzcore imports, and a Studio older than the SDK lacks
-    those exports, so the plugin fails to load with *"could not locate the
-    getSDKVersion() function"* in the Daz log. Releases therefore build
-    against the oldest supported 6.25 SDK, never a newer "Latest" SDK drop
-    (see the `release.ps1` default).
+  - *Daz Studio 6.x SDK* (beta) for the DS6 build — prefer an SDK **no newer
+    than the oldest Daz Studio 6** the DLL should load in (a newer SDK's
+    import lib may reference dzcore exports an older Studio lacks; releases
+    build against the oldest supported 6.25 SDK, see the `release.ps1`
+    default). Also note: the SDK's **Windows plugin macro exports C++-mangled
+    entry points** that Daz cannot resolve (*"load failed - could not locate
+    the getSDKVersion() function"*) — `pluginmain.cpp` pre-declares
+    `getSDKVersion`/`getPluginDefinition` as `extern "C"` to fix that; read
+    the comment there before touching it.
   - *DAZ Studio 4.5+ SDK* for the DS4 build (bundles its own Qt 4.8)
 - For the DS6 build only: a **Qt 6.10.x msvc2022 x64 devkit** matching the
   Qt bundled inside Daz Studio 6 (6.10.3 for DS 6.25). No Qt account needed:
