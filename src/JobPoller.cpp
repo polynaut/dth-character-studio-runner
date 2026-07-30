@@ -1,11 +1,19 @@
 #include "JobPoller.h"
 #include "CsvJobFile.h"
 
+#include <dzaction.h>
+#include <dzactionmgr.h>
 #include <dzapp.h>
 #include <dzcontentmgr.h>
 #include <dzmainwindow.h>
 #include <dzscene.h>
 #include <dzscript.h>
+
+#if DAZ_SDK_MAJOR_VERSION >= 6
+#include <QtWidgets/QMessageBox>
+#else
+#include <QtGui/QMessageBox>
+#endif
 
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -221,8 +229,70 @@ bool JobPoller::pickUpJsonJobFile(const QString &path)
     return true;
 }
 
+bool JobPoller::ensureSceneSafeToReplace()
+{
+    if (!dzScene || !dzScene->assetNeedSave())
+        return true;
+    // The user is likely looking at the studio, not Daz — raise the window so
+    // the prompt (and the choice it asks for) is actually seen.
+    raiseMainWindow();
+    QMessageBox box(dzApp ? dzApp->getInterface() : NULL);
+    box.setWindowTitle("Save Changes");
+    // Daz's own wording for the manual-open case — this IS that moment, just
+    // triggered by a DTH Character Studio job instead of File > Open.
+    box.setText("Would you like to save changes to the current scene before closing it?");
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Yes);
+    const int choice = box.exec();
+    if (choice == QMessageBox::Cancel)
+        return false;
+    if (choice == QMessageBox::No)
+        return true; // discard, exactly like answering Daz's own prompt with No
+    // Yes: run Daz's own File > Save action (interactive — an unsaved scene
+    // gets the regular Save As dialog). Still dirty afterwards = the user
+    // cancelled that dialog, which cancels the batch too.
+    DzMainWindow *win = dzApp ? dzApp->getInterface() : NULL;
+    DzActionMgr *actions = win ? win->getActionMgr() : NULL;
+    DzAction *save = actions ? actions->findAction("DzSaveFileAction") : NULL;
+    if (!save && actions)
+        save = actions->findAction("DzFileSaveAction");
+    if (!save) {
+        log("could not find Daz's File > Save action — treating Save Changes as cancelled");
+        return false;
+    }
+    save->trigger();
+    return !dzScene->assetNeedSave();
+}
+
+void JobPoller::cancelBatch(const QString &reason)
+{
+    log(QString("batch cancelled: %1").arg(reason));
+    if (!m_runningPath.isEmpty()) {
+        for (size_t i = 0; i < m_model.jobs.size(); ++i) {
+            dthjr::JsonJob &job = m_model.jobs[i];
+            if (job.status == dthjr::JobStatus::Done || job.status == dthjr::JobStatus::Failed)
+                continue;
+            job.status = dthjr::JobStatus::Failed;
+            job.error = std::string(reason.toUtf8().constData());
+        }
+        m_model.progress = 100;
+        writeRunningFile();
+        m_runningPath.clear();
+    }
+    m_queue.clear();
+    m_index = 0;
+    m_state = Polling;
+    m_pollTimer.start();
+}
+
 void JobPoller::stepOpenSceneOnly()
 {
+    // The user's open scene is about to be REPLACED — with THEIR work in it,
+    // not a batch row's throwaway keyframes. Same guard as the export batch.
+    if (!ensureSceneSafeToReplace()) {
+        cancelBatch("cancelled — unsaved changes in the open scene");
+        return;
+    }
     const Job &job = m_queue.at(0);
     QString error;
     if (!QFile::exists(job.scenePath)) {
@@ -347,6 +417,13 @@ void JobPoller::beginBatch(const QList<Job> &jobs)
 
 void JobPoller::stepOpenScene()
 {
+    // Row 0 replaces the USER'S open scene (later rows replace the previous
+    // row's throwaway ROM keyframes — nothing worth prompting for): a dirty
+    // scene gets Daz's Save Changes choice first; Cancel cancels the batch.
+    if (m_index == 0 && !ensureSceneSafeToReplace()) {
+        cancelBatch("cancelled — unsaved changes in the open scene");
+        return;
+    }
     const Job &job = m_queue.at(m_index);
 
     if (job.scenePath.isEmpty()) {

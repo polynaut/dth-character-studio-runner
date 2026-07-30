@@ -42,6 +42,14 @@ The normative contract lives in the studio repo:
 - **Never saves a scene.** The ROM keyframes a script creates are throwaway
   working state; the plugin ends every export batch on a fresh empty scene
   (open-scene batches excepted, see above).
+- **Never silently discards the USER'S scene either (v1.1.2+):** when the open
+  scene has unsaved changes as a batch starts (row 0 / an open-scene job), the
+  plugin raises the Daz window and shows Daz's own Save Changes choice
+  (Yes / No / Cancel; Yes runs the regular File > Save, incl. Save As for an
+  unsaved scene). Cancel — or cancelling the save — cancels the batch: the
+  remaining rows are marked `failed` ("cancelled — unsaved changes…"),
+  progress goes to 100 and the studio reports it. Later rows replace only the
+  previous row's throwaway keyframes and never prompt.
 
 All activity is logged to the Daz Studio log (Help → Troubleshooting →
 View Log File) with the prefix `[DTH Character Studio Runner]`. A manual trigger is

@@ -71,6 +71,12 @@ private:
     void advanceRow();
     void finishBatch();
     void newEmptyScene();
+    // The user's-scene guard: prompt (Daz-style Save Changes) when the OPEN
+    // scene has unsaved changes before the batch replaces it. False = cancel.
+    bool ensureSceneSafeToReplace();
+    // Mark every not-yet-processed row failed with `reason`, write progress
+    // 100 and return to polling — the batch-wide cancel.
+    void cancelBatch(const QString &reason);
     void rememberIgnored(const QString &path);
     static void log(const QString &message);
 
