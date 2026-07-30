@@ -17,7 +17,10 @@ const int kStartupDelayMs = 3000; // content-dir mapping may not be ready at plu
 const int kPollIntervalMs = 5000;
 const int kSettleMs = 500;        // event-loop drain between scene open and script run
 
-const char *const kJobFileRelPath = "/Scripts/DTH-Character-Studio/dth_exporter_jobs.csv";
+// Contract v2 (JSON, renamed on pickup) + the legacy v1 CSV.
+const char *const kJobFileRelPath = "/Scripts/DTH-Character-Studio/dth_exporter_jobs.json";
+const char *const kRunningJobFileName = "running_dth_exporter_jobs.json";
+const char *const kLegacyJobFileRelPath = "/Scripts/DTH-Character-Studio/dth_exporter_jobs.csv";
 const char *const kLogPrefix = "[DTH Character Studio Runner] ";
 
 void disposeScript(DzScript *script)
@@ -103,24 +106,97 @@ void JobPoller::onPollTick()
     if (!mgr)
         return;
 
-    QString found;
+    // Contract v2 (JSON) first, the legacy CSV as fallback — first mapped
+    // content directory wins for each.
     for (int i = 0; i < mgr->getNumContentDirectories(); ++i) {
         const QString candidate = mgr->getContentDirectoryPath(i) + kJobFileRelPath;
         if (QFile::exists(candidate)) {
-            found = candidate;
-            break; // first mapped directory wins
+            pickUpJsonJobFile(candidate);
+            return;
         }
     }
-    if (found.isEmpty())
-        return;
+    for (int i = 0; i < mgr->getNumContentDirectories(); ++i) {
+        const QString candidate = mgr->getContentDirectoryPath(i) + kLegacyJobFileRelPath;
+        if (QFile::exists(candidate)) {
+            pickUpLegacyCsvJobFile(candidate);
+            return;
+        }
+    }
+}
 
-    const QFileInfo info(found);
-    if (found == m_ignoredPath && info.size() == m_ignoredSize && info.lastModified() == m_ignoredMtime)
-        return; // previously rejected and unchanged — stay silent
+bool JobPoller::pickUpJsonJobFile(const QString &path)
+{
+    const QFileInfo info(path);
+    if (path == m_ignoredPath && info.size() == m_ignoredSize && info.lastModified() == m_ignoredMtime)
+        return false; // previously rejected and unchanged — stay silent
 
-    QFile file(found);
+    QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
-        return; // writer may still hold it — retry next tick
+        return false; // writer may still hold it — retry next tick
+    const QByteArray bytes = file.readAll();
+    file.close();
+
+    const dthjr::JsonParseResult parsed =
+        dthjr::parseJobJson(std::string_view(bytes.constData(), static_cast<size_t>(bytes.size())));
+
+    for (size_t i = 0; i < parsed.warnings.size(); ++i)
+        log(QString("job file: %1").arg(QString::fromStdString(parsed.warnings[i])));
+
+    if (!parsed.ok) {
+        log(QString("ignoring foreign/corrupt job file %1 (%2) — leaving it in place")
+                .arg(path, QString::fromStdString(parsed.error)));
+        rememberIgnored(path);
+        return false;
+    }
+
+    // The RENAME is the "started" signal — the studio can abort (delete) an
+    // un-renamed file, never a renamed one. A stale running_ file (an old
+    // finished batch nobody cleaned up) would block the rename: remove it.
+    const QString runningPath = info.absolutePath() + "/" + kRunningJobFileName;
+    if (QFile::exists(runningPath) && !QFile::remove(runningPath)) {
+        log(QString("could not clear the stale running job file %1 — retrying next poll").arg(runningPath));
+        return false;
+    }
+    if (!QFile::rename(path, runningPath)) {
+        // The studio may have deleted (aborted) or be rewriting it right now.
+        log(QString("could not rename job file %1 — retrying next poll").arg(path));
+        return false;
+    }
+
+    if (parsed.file.jobs.empty()) {
+        // Nothing runnable: complete the batch immediately so the studio sees
+        // 100 and cleans the file up.
+        m_model = parsed.file;
+        m_runningPath = runningPath;
+        m_model.progress = 100;
+        writeRunningFile();
+        m_runningPath.clear();
+        log("job file contained no runnable rows");
+        return true;
+    }
+
+    m_model = parsed.file;
+    m_runningPath = runningPath;
+    QList<Job> jobs;
+    for (size_t i = 0; i < parsed.file.jobs.size(); ++i) {
+        Job job;
+        job.scenePath = QString::fromStdString(parsed.file.jobs[i].scenePath);
+        job.scriptPath = QString::fromStdString(parsed.file.jobs[i].scriptPath);
+        jobs.append(job);
+    }
+    beginBatch(jobs);
+    return true;
+}
+
+bool JobPoller::pickUpLegacyCsvJobFile(const QString &path)
+{
+    const QFileInfo info(path);
+    if (path == m_ignoredPath && info.size() == m_ignoredSize && info.lastModified() == m_ignoredMtime)
+        return false; // previously rejected and unchanged — stay silent
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false; // writer may still hold it — retry next tick
     const QByteArray bytes = file.readAll();
     file.close();
 
@@ -132,24 +208,27 @@ void JobPoller::onPollTick()
 
     if (!parsed.ok) {
         log(QString("ignoring foreign/corrupt job file %1 (%2) — leaving it in place")
-                .arg(found, QString::fromStdString(parsed.error)));
-        rememberIgnored(found);
-        return;
+                .arg(path, QString::fromStdString(parsed.error)));
+        rememberIgnored(path);
+        return false;
     }
 
-    // Deleting the file is the "transfer succeeded" ack — do it before running
-    // anything so a crash mid-batch never re-runs the batch on the next start.
-    if (!QFile::remove(found)) {
-        log(QString("could not delete job file %1 — NOT running it (a re-poll would double-run)").arg(found));
-        rememberIgnored(found);
-        return;
+    // Legacy lifecycle: deleting the file is the "transfer succeeded" ack —
+    // do it before running anything so a crash mid-batch never re-runs the
+    // batch on the next start.
+    if (!QFile::remove(path)) {
+        log(QString("could not delete job file %1 — NOT running it (a re-poll would double-run)").arg(path));
+        rememberIgnored(path);
+        return false;
     }
 
     if (parsed.rows.empty()) {
         log("job file contained no runnable rows");
-        return;
+        return true;
     }
 
+    m_model = dthjr::JobFileModel();
+    m_runningPath.clear(); // legacy batches carry no progress file
     QList<Job> jobs;
     for (size_t i = 0; i < parsed.rows.size(); ++i) {
         Job job;
@@ -158,6 +237,43 @@ void JobPoller::onPollTick()
         jobs.append(job);
     }
     beginBatch(jobs);
+    return true;
+}
+
+void JobPoller::markRow(dthjr::JobStatus status, const QString &error)
+{
+    if (m_runningPath.isEmpty())
+        return; // legacy CSV batch — no progress file
+    if (m_index < 0 || static_cast<size_t>(m_index) >= m_model.jobs.size())
+        return;
+    dthjr::JsonJob &job = m_model.jobs[static_cast<size_t>(m_index)];
+    job.status = status;
+    job.error = error.isEmpty() ? std::string() : std::string(error.toUtf8().constData());
+    // Whole-batch progress = processed rows / total (done + failed count).
+    int processed = 0;
+    for (size_t i = 0; i < m_model.jobs.size(); ++i) {
+        if (m_model.jobs[i].status == dthjr::JobStatus::Done
+            || m_model.jobs[i].status == dthjr::JobStatus::Failed)
+            ++processed;
+    }
+    m_model.progress = static_cast<int>(
+        (processed * 100) / static_cast<int>(m_model.jobs.size() ? m_model.jobs.size() : 1));
+    writeRunningFile();
+}
+
+void JobPoller::writeRunningFile()
+{
+    if (m_runningPath.isEmpty())
+        return;
+    const std::string text = dthjr::writeJobJson(m_model);
+    QFile file(m_runningPath);
+    // Plain truncate-rewrite: the studio tolerates a torn read by re-polling.
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        log(QString("could not update the running job file %1").arg(m_runningPath));
+        return;
+    }
+    file.write(text.data(), static_cast<qint64>(text.size()));
+    file.close();
 }
 
 void JobPoller::beginBatch(const QList<Job> &jobs)
@@ -179,6 +295,7 @@ void JobPoller::stepOpenScene()
         newEmptyScene();
     } else if (!QFile::exists(job.scenePath)) {
         log(QString("row %1/%2 skipped: scene not found: %3").arg(m_index + 1).arg(m_queue.size()).arg(job.scenePath));
+        markRow(dthjr::JobStatus::Failed, "scene not found");
         advanceRow();
         return;
     } else {
@@ -188,6 +305,7 @@ void JobPoller::stepOpenScene()
         if (!dzApp->getContentMgr()->openFile(job.scenePath, false)) {
             log(QString("row %1/%2 skipped: failed to open scene: %3")
                     .arg(m_index + 1).arg(m_queue.size()).arg(job.scenePath));
+            markRow(dthjr::JobStatus::Failed, "failed to open scene");
             advanceRow();
             return;
         }
@@ -203,6 +321,7 @@ void JobPoller::stepExecute()
 
     if (!QFile::exists(job.scriptPath)) {
         log(QString("row %1/%2 skipped: script not found: %3").arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
+        markRow(dthjr::JobStatus::Failed, "script not found");
         advanceRow();
         return;
     }
@@ -215,17 +334,20 @@ void JobPoller::stepExecute()
         log(QString("row %1/%2 skipped: could not load script: %3")
                 .arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
         disposeScript(script);
+        markRow(dthjr::JobStatus::Failed, "could not load script");
         advanceRow();
         return;
     }
 
-    // Plain execute, no arguments (v1.0.4): arguments passed here never reached
-    // the script's getArguments(), so the studio generates a dedicated bulk
-    // script instead — which script the job row names IS the mode.
+    // Plain execute, no arguments (v1.0.4+): which script the job row names IS
+    // the mode — the studio generates a dedicated bulk script.
     log(QString("row %1/%2: running %3").arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
+    markRow(dthjr::JobStatus::Running);
     const bool ok = script->execute(); // synchronous; returns when the ROM + export are done
     disposeScript(script);
     log(QString("row %1/%2: %3").arg(m_index + 1).arg(m_queue.size()).arg(ok ? "done" : "script reported failure"));
+    markRow(ok ? dthjr::JobStatus::Done : dthjr::JobStatus::Failed,
+            ok ? QString() : QString("script reported failure"));
 
     advanceRow();
 }
@@ -244,6 +366,13 @@ void JobPoller::finishBatch()
     // The last row's scene is full of throwaway ROM keyframes — discard them
     // so quitting Daz later never prompts to save.
     newEmptyScene();
+    // Contract v2: progress 100 marks the batch complete; the file is LEFT in
+    // place — the STUDIO deletes it once it has read the outcome.
+    if (!m_runningPath.isEmpty()) {
+        m_model.progress = 100;
+        writeRunningFile();
+        m_runningPath.clear();
+    }
     log("batch finished");
     m_queue.clear();
     m_index = 0;

@@ -16,6 +16,14 @@ add_executable(test_csvjobfile
 target_include_directories(test_csvjobfile PRIVATE src)
 add_test(NAME csvjobfile COMMAND test_csvjobfile)
 
+add_executable(test_jsonjobfile
+	tests/test_jsonjobfile.cpp
+	src/JsonJobFile.cpp
+	src/JsonJobFile.h
+)
+target_include_directories(test_jsonjobfile PRIVATE src)
+add_test(NAME jsonjobfile COMMAND test_jsonjobfile)
+
 # ─── Plugin (requires a Daz Studio SDK; configure with -DDAZ_SDK_DIR=…) ──────
 
 set(DAZ_SDK_DIR "" CACHE PATH "Path to root of the DAZ Studio SDK (4.5+ or 6.x)")
@@ -107,6 +115,8 @@ add_library(dthcharacterstudiorunner SHARED
 	src/JobRunnerAction.h
 	src/CsvJobFile.cpp
 	src/CsvJobFile.h
+	src/JsonJobFile.cpp
+	src/JsonJobFile.h
 	src/version.h
 	src/version.rc
 )

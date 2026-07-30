@@ -1,29 +1,36 @@
 # DTH Character Studio Runner
 
 A Daz Studio C++ plugin that runs [DTH Character Studio](https://github.com/polynaut/dth-character-studio)
-export batches unattended. The studio writes a small CSV job file; this plugin
-polls for it, deletes it as the transfer ack, and executes every row — no
-clicking through scenes and scripts by hand.
+export batches unattended. The studio writes a small JSON job file; this
+plugin polls for it, renames it as the "started" signal, executes every row
+and keeps the file's progress current — no clicking through scenes and
+scripts by hand.
 
 The normative contract lives in the studio repo:
-`dth-character-studio/docs/exporter-plugin-job-file.md`. Summary:
+`dth-character-studio/docs/exporter-plugin-job-file.md`. Summary (v2):
 
-- **Job file:** `dth_exporter_jobs.csv` directly inside
+- **Job file:** `dth_exporter_jobs.json` directly inside
   `<content dir>/Scripts/DTH-Character-Studio/`. The plugin probes **every
   mapped Daz content directory** and processes the first file it finds.
-- **Format:** UTF-8, header `daz-scene-path,daz-script-path`, RFC-4180
-  quoting, LF or CRLF. An empty scene column means "run in a new empty
-  scene". Unknown extra columns are ignored (forward compatibility). A file
-  whose header doesn't match is foreign: it is left in place, warned about
-  once, and skipped until it changes.
+- **Format:** UTF-8 JSON — `{version: 1, type: "bulk-export", progress,
+  jobs: [{scenePath, scriptPath, status, error?}]}`. An empty `scenePath`
+  means "run in a new empty scene". Unknown fields are ignored (forward
+  compatibility). A file with another version/type is foreign: left in
+  place, warned about once, skipped until it changes.
 - **Lifecycle:** poll (every 5 s, starting a few seconds after launch) →
-  parse → **delete** (deletion = "transfer succeeded", and a crash mid-run
-  never re-runs the batch) → per row: open the scene with a no-save replace
-  (or explicitly start a new empty scene) → run the row's `.dsa` (plain
+  **rename** to `running_dth_exporter_jobs.json` (the "started" signal — the
+  studio can only abort an un-renamed file; a stale `running_` leftover is
+  cleared first) → per row: open the scene with a no-save replace (or
+  explicitly start a new empty scene) → run the row's `.dsa` (plain
   `DzScript::execute()`, no arguments — script arguments never reach
   `getArguments()`, measured; the studio's job rows point at a dedicated bulk
-  script instead) → next row. Per-row failures are
-  logged and skipped. Polling is suspended while a batch runs.
+  script instead) → update the row's status + the whole-batch `progress` in
+  the renamed file → next row. At the end the plugin writes `progress: 100`
+  and LEAVES the file — the studio reads the outcome and deletes it. Per-row
+  failures are logged, marked `failed` (+ `error`) and skipped. Polling is
+  suspended while a batch runs.
+- **Legacy:** the old `dth_exporter_jobs.csv` (contract v1) keeps its
+  parse → delete-as-ack → run lifecycle for older studio versions.
 - **Never saves a scene.** The ROM keyframes a script creates are throwaway
   working state; the plugin ends every batch on a fresh empty scene.
 
@@ -111,6 +118,9 @@ Daz Studio 4 plugins carry no prefix. The build sets this automatically.
 
 - `src/CsvJobFile.{h,cpp}` — pure C++17 parser (no Qt/SDK), unit-tested in
   `tests/test_csvjobfile.cpp`; runs on every push via GitHub Actions.
+- `src/JsonJobFile.{h,cpp}` — pure C++17 reader/writer for the v2 JSON job
+  file (hand-rolled: the DS4 build is Qt 4.8, no QJsonDocument), unit-tested
+  in `tests/test_jsonjobfile.cpp`; same CI.
 - `src/JobPoller.{h,cpp}` — main-thread QTimer poll + queued-slot batch state
   machine. All Daz API and `DzScript` calls stay on the main thread (a hard
   SDK rule), which a main-thread timer gives us for free.
