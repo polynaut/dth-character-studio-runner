@@ -19,8 +19,10 @@ The normative contract lives in the studio repo:
 - **Lifecycle:** poll (every 5 s, starting a few seconds after launch) →
   parse → **delete** (deletion = "transfer succeeded", and a crash mid-run
   never re-runs the batch) → per row: open the scene with a no-save replace
-  (or explicitly start a new empty scene) → run the row's `.dsa` with the
-  single string argument `bulk-export` → next row. Per-row failures are
+  (or explicitly start a new empty scene) → run the row's `.dsa` (plain
+  `DzScript::execute()`, no arguments — script arguments never reach
+  `getArguments()`, measured; the studio's job rows point at a dedicated bulk
+  script instead) → next row. Per-row failures are
   logged and skipped. Polling is suspended while a batch runs.
 - **Never saves a scene.** The ROM keyframes a script creates are throwaway
   working state; the plugin ends every batch on a fresh empty scene.
@@ -103,8 +105,7 @@ Daz Studio 4 plugins carry no prefix. The build sets this automatically.
    /Scripts/DTH-Character-Studio/dth_exporter_jobs.csv (every 5 s)`.
 3. Drop a hand-written job file into
    `<My DAZ 3D Library>\Scripts\DTH-Character-Studio\` pointing at a trivial
-   `.dsa`; it should be consumed within ~5 seconds and the script executed
-   with `getArguments()[0] == "bulk-export"`.
+   `.dsa`; it should be consumed within ~5 seconds and the script executed.
 
 ## Development
 

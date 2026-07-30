@@ -219,10 +219,11 @@ void JobPoller::stepExecute()
         return;
     }
 
-    QVariantList args;
-    args << QString("bulk-export");
+    // Plain execute, no arguments (v1.0.4): arguments passed here never reached
+    // the script's getArguments(), so the studio generates a dedicated bulk
+    // script instead — which script the job row names IS the mode.
     log(QString("row %1/%2: running %3").arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
-    const bool ok = script->execute(args); // synchronous; returns when the ROM + export are done
+    const bool ok = script->execute(); // synchronous; returns when the ROM + export are done
     disposeScript(script);
     log(QString("row %1/%2: %3").arg(m_index + 1).arg(m_queue.size()).arg(ok ? "done" : "script reported failure"));
 
