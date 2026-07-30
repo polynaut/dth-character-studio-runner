@@ -446,6 +446,18 @@ std::string writeJobJson(const JobFileModel &file)
     char buf[16];
     std::snprintf(buf, sizeof(buf), "%d", progress);
     out += buf;
+    // The processed-rows counter (v1.1.1, "Exporting 1/2" in the studio) —
+    // COMPUTED from the row statuses at write time so it can never drift from
+    // them. `progress` stays alongside as the finish signal (older studios
+    // delete the file at 100).
+    int jobsDone = 0;
+    for (size_t i = 0; i < file.jobs.size(); ++i) {
+        if (file.jobs[i].status == JobStatus::Done || file.jobs[i].status == JobStatus::Failed)
+            ++jobsDone;
+    }
+    out += ",\n  \"jobsDone\": ";
+    std::snprintf(buf, sizeof(buf), "%d", jobsDone);
+    out += buf;
     out += ",\n  \"jobs\": [";
     for (size_t i = 0; i < file.jobs.size(); ++i) {
         const JsonJob &job = file.jobs[i];

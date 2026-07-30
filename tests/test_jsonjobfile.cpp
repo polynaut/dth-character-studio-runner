@@ -129,6 +129,34 @@ static void test_writer_empty_batch()
     CHECK(r.file.jobs.empty());
 }
 
+static void test_writer_emits_jobs_done_counter()
+{
+    // v1.1.1: the writer emits `jobsDone` (done + failed), computed from the
+    // row statuses so it can never drift from them.
+    JobFileModel model;
+    model.progress = 50;
+    JsonJob a;
+    a.scenePath = "C:/a.duf";
+    a.scriptPath = "C:/s.dsa";
+    a.status = JobStatus::Done;
+    JsonJob b;
+    b.scenePath = "C:/b.duf";
+    b.scriptPath = "C:/s.dsa";
+    b.status = JobStatus::Failed;
+    JsonJob c;
+    c.scenePath = "C:/c.duf";
+    c.scriptPath = "C:/s.dsa";
+    c.status = JobStatus::Running;
+    model.jobs.push_back(a);
+    model.jobs.push_back(b);
+    model.jobs.push_back(c);
+    const std::string text = writeJobJson(model);
+    CHECK(text.find("\"jobsDone\": 2") != std::string::npos);
+    // The counter survives a parse→rewrite round trip as a plain unknown field
+    // to THIS parser (the studio reads it; the runner recomputes on write).
+    CHECK(parseJobJson(text).ok);
+}
+
 static void test_open_scene_batch()
 {
     // Contract v3: one script-less row is VALID for type open-scene (the
@@ -190,6 +218,7 @@ int main()
     test_tolerance();
     test_unicode_escapes();
     test_writer_empty_batch();
+    test_writer_emits_jobs_done_counter();
     test_open_scene_batch();
     test_open_scene_invalid_shapes_are_foreign();
     test_open_scene_round_trip_keeps_type();
