@@ -267,16 +267,12 @@ bool JobPoller::ensureSceneSafeToReplace()
 void JobPoller::cancelBatch(const QString &reason)
 {
     log(QString("batch cancelled: %1").arg(reason));
+    // A user cancel is not an outcome to report — DELETE the job file so
+    // nothing lingers and nothing re-runs. (The studio treats a vanished
+    // watched file as a dead watch; un-watched handoffs simply disappear.)
     if (!m_runningPath.isEmpty()) {
-        for (size_t i = 0; i < m_model.jobs.size(); ++i) {
-            dthjr::JsonJob &job = m_model.jobs[i];
-            if (job.status == dthjr::JobStatus::Done || job.status == dthjr::JobStatus::Failed)
-                continue;
-            job.status = dthjr::JobStatus::Failed;
-            job.error = std::string(reason.toUtf8().constData());
-        }
-        m_model.progress = 100;
-        writeRunningFile();
+        if (!QFile::remove(m_runningPath))
+            log(QString("could not delete the cancelled job file %1").arg(m_runningPath));
         m_runningPath.clear();
     }
     m_queue.clear();

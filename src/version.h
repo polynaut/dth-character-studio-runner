@@ -2,8 +2,8 @@
 
 #define PLUGIN_MAJOR 1
 #define PLUGIN_MINOR 1
-#define PLUGIN_REV 2
-#define PLUGIN_BUILD 9
+#define PLUGIN_REV 3
+#define PLUGIN_BUILD 10
 
 // Dotted string for the Windows VERSIONINFO resource (version.rc) — derived
 // from the numbers above so version.h stays the single source of truth.
