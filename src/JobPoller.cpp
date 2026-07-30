@@ -299,9 +299,19 @@ void JobPoller::stepOpenSceneOnly()
         error = "failed to open scene";
         log(QString("open-scene failed: could not open %1").arg(job.scenePath));
     } else {
+        // The scene was just READ from disk and the user has not touched it, but
+        // Daz still flags it as needing a save (post-load fixups mark the asset
+        // modified) — so closing Daz asked to save changes nobody made, and the
+        // next handoff would hit our own Save Changes guard for nothing. Tell
+        // Daz the asset matches its file again (DzScene::assetSaved(), public in
+        // both SDKs). Only on the open-scene path: after a BUILD the in-memory
+        // scene genuinely differs from the file, and that one is discarded by
+        // newEmptyScene() anyway.
+        if (dzScene)
+            dzScene->assetSaved();
         // The studio can't do this half from outside the process.
         raiseMainWindow();
-        log("open-scene done — window raised, scene left loaded");
+        log("open-scene done — window raised, scene left loaded (marked unmodified)");
     }
     // One row → this write is also progress 100; the studio deletes the file.
     markRow(error.isEmpty() ? dthjr::JobStatus::Done : dthjr::JobStatus::Failed, error);
@@ -514,9 +524,8 @@ void JobPoller::finishBatch()
 
 void JobPoller::newEmptyScene()
 {
-    // DzScene::clear() is the File > New equivalent (dzscene.h, Q_SLOT).
-    // The SDK exposes no scene dirty-flag API, so clear() is also our only
-    // means of ensuring quitting Daz never prompts to save — verified by the
-    // end-to-end smoke test.
+    // DzScene::clear() is the File > New equivalent (dzscene.h, Q_SLOT) — it
+    // drops the batch's throwaway ROM keyframes so quitting Daz never prompts
+    // to save them (verified by the end-to-end smoke test).
     dzScene->clear();
 }

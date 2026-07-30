@@ -36,7 +36,9 @@ The normative contract lives in the studio repo:
   (impossible from outside the process), marks the row done and writes
   `progress: 100` — and, deliberately, does NOT end on a new empty scene: the
   loaded scene is the point. Any other shape (several rows, empty scenePath)
-  is foreign.
+  is foreign. Since v1.1.4 the freshly loaded scene is also marked **unmodified**
+  (`DzScene::assetSaved()`): Daz flags a just-loaded scene as needing a save, so
+  closing it asked to save changes nobody had made.
 - **Legacy:** the old `dth_exporter_jobs.csv` (contract v1) keeps its
   parse → delete-as-ack → run lifecycle for older studio versions.
 - **Never saves a scene.** The ROM keyframes a script creates are throwaway
