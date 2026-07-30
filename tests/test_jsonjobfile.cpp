@@ -129,6 +129,59 @@ static void test_writer_empty_batch()
     CHECK(r.file.jobs.empty());
 }
 
+static void test_open_scene_batch()
+{
+    // Contract v3: one script-less row is VALID for type open-scene (the
+    // v2 "skip rows without a script" rule is bulk-export-only).
+    const JsonParseResult r = parseJobJson(
+        "{\n"
+        "  \"version\": 1,\n"
+        "  \"type\": \"open-scene\",\n"
+        "  \"progress\": 0,\n"
+        "  \"jobs\": [\n"
+        "    { \"scenePath\": \"C:\\\\P\\\\primary\\\\Kira.duf\", \"status\": \"pending\" }\n"
+        "  ]\n"
+        "}\n");
+    CHECK(r.ok);
+    CHECK(r.file.type == "open-scene");
+    CHECK(r.warnings.empty());
+    CHECK(r.file.jobs.size() == 1);
+    CHECK(r.file.jobs[0].scenePath == "C:\\P\\primary\\Kira.duf");
+    CHECK(r.file.jobs[0].scriptPath.empty());
+}
+
+static void test_open_scene_invalid_shapes_are_foreign()
+{
+    // More than one row, an empty scenePath, or no rows: foreign, never run.
+    CHECK(!parseJobJson(
+              "{\"version\": 1, \"type\": \"open-scene\", \"jobs\": ["
+              "{ \"scenePath\": \"C:/a.duf\" }, { \"scenePath\": \"C:/b.duf\" }]}")
+               .ok);
+    CHECK(!parseJobJson(
+              "{\"version\": 1, \"type\": \"open-scene\", \"jobs\": [{ \"scenePath\": \"\" }]}")
+               .ok);
+    CHECK(!parseJobJson("{\"version\": 1, \"type\": \"open-scene\", \"jobs\": []}").ok);
+}
+
+static void test_open_scene_round_trip_keeps_type()
+{
+    // The running_ rewrite must carry the type through — a studio reading the
+    // progress file back sees the batch kind it wrote.
+    JobFileModel model;
+    model.type = "open-scene";
+    model.progress = 100;
+    JsonJob row;
+    row.scenePath = "C:\\P\\primary\\Kira.duf";
+    row.status = JobStatus::Done;
+    model.jobs.push_back(row);
+    const JsonParseResult r = parseJobJson(writeJobJson(model));
+    CHECK(r.ok);
+    CHECK(r.file.type == "open-scene");
+    CHECK(r.file.progress == 100);
+    CHECK(r.file.jobs.size() == 1);
+    CHECK(r.file.jobs[0].status == JobStatus::Done);
+}
+
 int main()
 {
     test_happy_path();
@@ -137,6 +190,9 @@ int main()
     test_tolerance();
     test_unicode_escapes();
     test_writer_empty_batch();
+    test_open_scene_batch();
+    test_open_scene_invalid_shapes_are_foreign();
+    test_open_scene_round_trip_keeps_type();
 
     if (g_failures == 0)
         std::printf("all json job-file tests passed\n");

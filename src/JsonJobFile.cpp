@@ -234,11 +234,13 @@ const char *statusToString(JobStatus status)
     return "pending";
 }
 
-bool parseJob(Cursor &c, JsonJob &job, bool &valid, std::vector<std::string> &warnings)
+// Parses one row as-is. Validity is TYPE-dependent (an open-scene row is
+// legal without a script), so it is judged after the whole file is read —
+// never here.
+bool parseJob(Cursor &c, JsonJob &job)
 {
     if (!consume(c, '{'))
         return false;
-    bool sawScript = false;
     skipWs(c);
     if (!consume(c, '}')) {
         while (true) {
@@ -253,7 +255,6 @@ bool parseJob(Cursor &c, JsonJob &job, bool &valid, std::vector<std::string> &wa
             } else if (key == "scriptPath") {
                 if (!parseString(c, job.scriptPath))
                     return false;
-                sawScript = true;
             } else if (key == "status") {
                 std::string status;
                 if (!parseString(c, status))
@@ -272,9 +273,6 @@ bool parseJob(Cursor &c, JsonJob &job, bool &valid, std::vector<std::string> &wa
             break;
         }
     }
-    valid = sawScript && !job.scriptPath.empty();
-    if (!valid)
-        warnings.push_back("skipped a job row without a scriptPath");
     return true;
 }
 
@@ -362,13 +360,11 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
                 if (!consume(c, ']')) {
                     while (true) {
                         JsonJob job;
-                        bool valid = false;
-                        if (!parseJob(c, job, valid, result.warnings)) {
+                        if (!parseJob(c, job)) {
                             result.error = "malformed job row";
                             return result;
                         }
-                        if (valid)
-                            jobs.push_back(job);
+                        jobs.push_back(job);
                         if (consume(c, ','))
                             continue;
                         if (!consume(c, ']'))
@@ -397,7 +393,7 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
         result.error = "unsupported version (expected 1)";
         return result;
     }
-    if (type != "bulk-export") {
+    if (type != "bulk-export" && type != "open-scene") {
         result.error = "unknown job type '" + type + "'";
         return result;
     }
@@ -406,10 +402,31 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
         return result;
     }
 
+    if (type == "open-scene") {
+        // Contract v3: exactly one row, with a scene, nothing to execute.
+        // Anything else makes the whole file foreign — a scene load is never
+        // best-effort ("open nothing"/"open several" is not a request).
+        if (jobs.size() != 1 || jobs[0].scenePath.empty()) {
+            result.error = "invalid open-scene batch (exactly one row with a scenePath)";
+            return result;
+        }
+    } else {
+        // bulk-export: a row without a script cannot run — skip it, keep going.
+        std::vector<JsonJob> runnable;
+        for (size_t i = 0; i < jobs.size(); ++i) {
+            if (jobs[i].scriptPath.empty())
+                result.warnings.push_back("skipped a job row without a scriptPath");
+            else
+                runnable.push_back(jobs[i]);
+        }
+        jobs.swap(runnable);
+    }
+
     if (progress < 0)
         progress = 0;
     if (progress > 100)
         progress = 100;
+    result.file.type = type;
     result.file.progress = static_cast<int>(progress);
     result.file.jobs = jobs;
     result.ok = true;
@@ -418,7 +435,9 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
 
 std::string writeJobJson(const JobFileModel &file)
 {
-    std::string out = "{\n  \"version\": 1,\n  \"type\": \"bulk-export\",\n  \"progress\": ";
+    std::string out = "{\n  \"version\": 1,\n  \"type\": \"";
+    escapeInto(out, file.type.empty() ? std::string("bulk-export") : file.type);
+    out += "\",\n  \"progress\": ";
     int progress = file.progress;
     if (progress < 0)
         progress = 0;

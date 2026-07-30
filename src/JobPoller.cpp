@@ -3,6 +3,7 @@
 
 #include <dzapp.h>
 #include <dzcontentmgr.h>
+#include <dzmainwindow.h>
 #include <dzscene.h>
 #include <dzscript.h>
 
@@ -30,6 +31,21 @@ void disposeScript(DzScript *script)
 #else
     delete script;   // SDK4: plain public virtual destructor
 #endif
+}
+
+// Bring the Daz Studio main window to the front — the open-scene batch's
+// second half. Only possible from INSIDE the process: Windows refuses
+// SetForegroundWindow (what activateWindow maps to) from a background
+// process, which is exactly why the studio delegates the whole open here.
+void raiseMainWindow()
+{
+    DzMainWindow *win = dzApp ? dzApp->getInterface() : NULL;
+    if (!win)
+        return;
+    if (win->isMinimized())
+        win->showNormal();
+    win->raise();
+    win->activateWindow();
 }
 
 } // namespace
@@ -177,6 +193,23 @@ bool JobPoller::pickUpJsonJobFile(const QString &path)
 
     m_model = parsed.file;
     m_runningPath = runningPath;
+
+    if (parsed.file.type == "open-scene") {
+        // Contract v3: one script-less row — load the scene into THIS Daz and
+        // come to the front. Runs as its own single-step batch (same
+        // rename/progress bookkeeping, different ending: the scene stays).
+        m_pollTimer.stop();
+        m_state = RunningBatch;
+        m_queue.clear();
+        Job job;
+        job.scenePath = QString::fromStdString(parsed.file.jobs[0].scenePath);
+        m_queue.append(job);
+        m_index = 0;
+        log(QString("open-scene handoff: %1").arg(job.scenePath));
+        QMetaObject::invokeMethod(this, "stepOpenSceneOnly", Qt::QueuedConnection);
+        return true;
+    }
+
     QList<Job> jobs;
     for (size_t i = 0; i < parsed.file.jobs.size(); ++i) {
         Job job;
@@ -186,6 +219,32 @@ bool JobPoller::pickUpJsonJobFile(const QString &path)
     }
     beginBatch(jobs);
     return true;
+}
+
+void JobPoller::stepOpenSceneOnly()
+{
+    const Job &job = m_queue.at(0);
+    QString error;
+    if (!QFile::exists(job.scenePath)) {
+        error = "scene not found";
+        log(QString("open-scene failed: scene not found: %1").arg(job.scenePath));
+    } else if (!dzApp->getContentMgr()->openFile(job.scenePath, false)) {
+        // merge=false replaces the current scene without a save prompt.
+        error = "failed to open scene";
+        log(QString("open-scene failed: could not open %1").arg(job.scenePath));
+    } else {
+        // The studio can't do this half from outside the process.
+        raiseMainWindow();
+        log("open-scene done — window raised, scene left loaded");
+    }
+    // One row → this write is also progress 100; the studio deletes the file.
+    markRow(error.isEmpty() ? dthjr::JobStatus::Done : dthjr::JobStatus::Failed, error);
+    m_runningPath.clear();
+    // Deliberately NO newEmptyScene(): the loaded scene is the whole point.
+    m_queue.clear();
+    m_index = 0;
+    m_state = Polling;
+    m_pollTimer.start();
 }
 
 bool JobPoller::pickUpLegacyCsvJobFile(const QString &path)

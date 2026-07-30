@@ -7,7 +7,7 @@ and keeps the file's progress current — no clicking through scenes and
 scripts by hand.
 
 The normative contract lives in the studio repo:
-`dth-character-studio/docs/exporter-plugin-job-file.md`. Summary (v2):
+`dth-character-studio/docs/exporter-plugin-job-file.md`. Summary (v2+v3):
 
 - **Job file:** `dth_exporter_jobs.json` directly inside
   `<content dir>/Scripts/DTH-Character-Studio/`. The plugin probes **every
@@ -29,10 +29,19 @@ The normative contract lives in the studio repo:
   and LEAVES the file — the studio reads the outcome and deletes it. Per-row
   failures are logged, marked `failed` (+ `error`) and skipped. Polling is
   suspended while a batch runs.
+- **`type: "open-scene"` (contract v3, v1.1.0+):** the same envelope carrying
+  ONE script-less row — the studio's "Open in Daz" for an already-running
+  instance (Daz drops forwarded command-line opens once a scene is loaded).
+  The plugin loads the scene (no-save replace), **raises the Daz main window**
+  (impossible from outside the process), marks the row done and writes
+  `progress: 100` — and, deliberately, does NOT end on a new empty scene: the
+  loaded scene is the point. Any other shape (several rows, empty scenePath)
+  is foreign.
 - **Legacy:** the old `dth_exporter_jobs.csv` (contract v1) keeps its
   parse → delete-as-ack → run lifecycle for older studio versions.
 - **Never saves a scene.** The ROM keyframes a script creates are throwaway
-  working state; the plugin ends every batch on a fresh empty scene.
+  working state; the plugin ends every export batch on a fresh empty scene
+  (open-scene batches excepted, see above).
 
 All activity is logged to the Daz Studio log (Help → Troubleshooting →
 View Log File) with the prefix `[DTH Character Studio Runner]`. A manual trigger is

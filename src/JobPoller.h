@@ -16,6 +16,13 @@
 // (dth_exporter_jobs.csv: parse → delete-as-ack → run, no progress) stays
 // supported for older studios.
 //
+// Contract v3 adds `type: "open-scene"`: the same envelope carrying ONE
+// script-less row — load that scene into THIS (running) Daz instance and
+// raise the main window, because the studio outside the process can do
+// neither once a scene is loaded. Same rename/progress bookkeeping; the one
+// deliberate difference is the ending — the scene STAYS loaded (no new empty
+// scene: nothing ran, there are no throwaway ROM keyframes to discard).
+//
 // Qt note: string-based connect/invokeMethod/singleShot only — this file
 // compiles against both Qt 4.8 (DS4 SDK) and Qt 6 (DS6 SDK).
 
@@ -46,6 +53,7 @@ private slots:
     void onPollTick();
     void stepOpenScene();
     void stepExecute();
+    void stepOpenSceneOnly(); // the whole open-scene (contract v3) batch
 
 private:
     JobPoller();
