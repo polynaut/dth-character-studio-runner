@@ -61,6 +61,7 @@ private:
     struct Job {
         QString scenePath;  // empty = new empty scene
         QString scriptPath;
+        int steps = 0;      // per-scene step count for the progress log (0 = unknown)
     };
 
     // Job-file discovery per contract: JSON (v2) first, legacy CSV second.
@@ -85,6 +86,15 @@ private:
     void markRow(dthjr::JobStatus status, const QString &error = QString());
     void writeRunningFile();
 
+    // v1.2.0 verbose progress log: append "[<percent>] <message>" to the
+    // job's progressLogPath (no-op when the job carries none). The percent is
+    // PER-SCENE (see JsonJobFile.h); the studio-generated export script
+    // appends the interior steps to the same file.
+    void progressLine(int percent, const QString &message);
+    // The display stem of the current row's scene ("new scene" for an empty
+    // row) — how the progress log names the scene it is working.
+    QString currentSceneStem() const;
+
     enum State { Stopped, Polling, RunningBatch };
 
     State m_state;
@@ -97,6 +107,8 @@ private:
     // from, and where it lives. Empty path = legacy CSV batch (no progress).
     dthjr::JobFileModel m_model;
     QString m_runningPath;
+    // The verbose progress log (v1.2.0). Empty = the job carried none.
+    QString m_progressPath;
 
     // Signature of a file we refused to parse (foreign/corrupt) or could not
     // delete/rename — skip it silently until it changes, so it doesn't spam

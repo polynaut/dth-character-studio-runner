@@ -13,10 +13,21 @@ The normative contract lives in the studio repo:
   `<content dir>/Scripts/DTH-Character-Studio/`. The plugin probes **every
   mapped Daz content directory** and processes the first file it finds.
 - **Format:** UTF-8 JSON — `{version: 1, type: "bulk-export", progress,
-  jobs: [{scenePath, scriptPath, status, error?}]}`. An empty `scenePath`
-  means "run in a new empty scene". Unknown fields are ignored (forward
-  compatibility). A file with another version/type is foreign: left in
-  place, warned about once, skipped until it changes.
+  progressLogPath?, jobs: [{scenePath, scriptPath, steps?, status, error?}]}`.
+  An empty `scenePath` means "run in a new empty scene". Unknown fields are
+  ignored (forward compatibility). A file with another version/type is
+  foreign: left in place, warned about once, skipped until it changes.
+- **Verbose progress log (v1.2.0):** when the job carries `progressLogPath`,
+  the plugin truncates that file at batch start and appends
+  `[<percent>] <message>` lines as it works. The percent is **per scene**:
+  each row's export is `steps` equal steps (the row's `steps`, e.g. 5 = open
+  scene / generate ROM / export character / export hair / deliver CSV). The
+  plugin reports the steps it owns — `[0] <scene>: opening scene`,
+  `[100/steps] <scene>: scene opened`, terminal `[100] <scene>: done|failed —
+  <reason>` — and the studio-generated export script appends the interior
+  steps to the same file on the same scale while `DzScript::execute()` runs.
+  Without `progressLogPath` nothing is written; the whole-batch `progress`
+  field in the job file keeps working regardless (older studios rely on it).
 - **Lifecycle:** poll (every 5 s, starting a few seconds after launch) →
   **rename** to `running_dth_exporter_jobs.json` (the "started" signal — the
   studio can only abort an un-renamed file; a stale `running_` leftover is

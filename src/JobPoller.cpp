@@ -201,6 +201,17 @@ bool JobPoller::pickUpJsonJobFile(const QString &path)
 
     m_model = parsed.file;
     m_runningPath = runningPath;
+    // v1.2.0: arm the verbose progress log. The plugin OWNS the file for the
+    // batch — truncate whatever a previous run left, so the studio's watcher
+    // only ever sees this batch's lines.
+    m_progressPath = QString::fromStdString(parsed.file.progressLogPath);
+    if (!m_progressPath.isEmpty()) {
+        QFile fresh(m_progressPath);
+        if (fresh.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            fresh.close();
+        else
+            log(QString("could not truncate the progress log %1 — appending anyway").arg(m_progressPath));
+    }
 
     if (parsed.file.type == "open-scene") {
         // Contract v3: one script-less row — load the scene into THIS Daz and
@@ -223,10 +234,36 @@ bool JobPoller::pickUpJsonJobFile(const QString &path)
         Job job;
         job.scenePath = QString::fromStdString(parsed.file.jobs[i].scenePath);
         job.scriptPath = QString::fromStdString(parsed.file.jobs[i].scriptPath);
+        job.steps = parsed.file.jobs[i].steps;
         jobs.append(job);
     }
     beginBatch(jobs);
     return true;
+}
+
+void JobPoller::progressLine(int percent, const QString &message)
+{
+    if (m_progressPath.isEmpty())
+        return;
+    QFile file(m_progressPath);
+    // Open-append-close per line: the log is low-volume (a handful of lines
+    // per scene) and the close is the flush the studio's watcher relies on.
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append))
+        return;
+    const std::string line =
+        dthjr::formatProgressLine(percent, std::string(message.toUtf8().constData()));
+    file.write(line.data(), static_cast<qint64>(line.size()));
+    file.close();
+}
+
+QString JobPoller::currentSceneStem() const
+{
+    if (m_index < 0 || m_index >= m_queue.size())
+        return QString("scene");
+    const QString &path = m_queue.at(m_index).scenePath;
+    if (path.isEmpty())
+        return QString("new scene");
+    return QFileInfo(path).completeBaseName();
 }
 
 bool JobPoller::ensureSceneSafeToReplace()
@@ -267,6 +304,8 @@ bool JobPoller::ensureSceneSafeToReplace()
 void JobPoller::cancelBatch(const QString &reason)
 {
     log(QString("batch cancelled: %1").arg(reason));
+    progressLine(100, QString("batch cancelled — %1").arg(reason));
+    m_progressPath.clear();
     // A user cancel is not an outcome to report — DELETE the job file so
     // nothing lingers and nothing re-runs. (The studio treats a vanished
     // watched file as a dead watch; un-watched handoffs simply disappear.)
@@ -316,6 +355,7 @@ void JobPoller::stepOpenSceneOnly()
     // One row → this write is also progress 100; the studio deletes the file.
     markRow(error.isEmpty() ? dthjr::JobStatus::Done : dthjr::JobStatus::Failed, error);
     m_runningPath.clear();
+    m_progressPath.clear(); // open-scene handoffs write no progress lines
     // Deliberately NO newEmptyScene(): the loaded scene is the whole point.
     m_queue.clear();
     m_index = 0;
@@ -363,7 +403,8 @@ bool JobPoller::pickUpLegacyCsvJobFile(const QString &path)
     }
 
     m_model = dthjr::JobFileModel();
-    m_runningPath.clear(); // legacy batches carry no progress file
+    m_runningPath.clear();  // legacy batches carry no progress file
+    m_progressPath.clear(); // …and no verbose progress log either
     QList<Job> jobs;
     for (size_t i = 0; i < parsed.rows.size(); ++i) {
         Job job;
@@ -431,12 +472,15 @@ void JobPoller::stepOpenScene()
         return;
     }
     const Job &job = m_queue.at(m_index);
+    const QString stem = currentSceneStem();
+    progressLine(0, QString("%1: opening scene").arg(stem));
 
     if (job.scenePath.isEmpty()) {
         log(QString("row %1/%2: new empty scene").arg(m_index + 1).arg(m_queue.size()));
         newEmptyScene();
     } else if (!QFile::exists(job.scenePath)) {
         log(QString("row %1/%2 skipped: scene not found: %3").arg(m_index + 1).arg(m_queue.size()).arg(job.scenePath));
+        progressLine(100, QString("%1: failed — scene not found").arg(stem));
         markRow(dthjr::JobStatus::Failed, "scene not found");
         advanceRow();
         return;
@@ -447,11 +491,16 @@ void JobPoller::stepOpenScene()
         if (!dzApp->getContentMgr()->openFile(job.scenePath, false)) {
             log(QString("row %1/%2 skipped: failed to open scene: %3")
                     .arg(m_index + 1).arg(m_queue.size()).arg(job.scenePath));
+            progressLine(100, QString("%1: failed — could not open the scene").arg(stem));
             markRow(dthjr::JobStatus::Failed, "failed to open scene");
             advanceRow();
             return;
         }
     }
+    // Step 1 of the row is done: the scene is open. The export script owns
+    // the interior steps and continues this scale in the same file.
+    progressLine(job.steps > 0 ? 100 / job.steps : 0,
+                 QString("%1: scene opened").arg(stem));
 
     // Let deferred post-load work settle before the script runs.
     QTimer::singleShot(kSettleMs, this, SLOT(stepExecute()));
@@ -460,9 +509,11 @@ void JobPoller::stepOpenScene()
 void JobPoller::stepExecute()
 {
     const Job &job = m_queue.at(m_index);
+    const QString stem = currentSceneStem();
 
     if (!QFile::exists(job.scriptPath)) {
         log(QString("row %1/%2 skipped: script not found: %3").arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
+        progressLine(100, QString("%1: failed — export script not found").arg(stem));
         markRow(dthjr::JobStatus::Failed, "script not found");
         advanceRow();
         return;
@@ -476,18 +527,23 @@ void JobPoller::stepExecute()
         log(QString("row %1/%2 skipped: could not load script: %3")
                 .arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
         disposeScript(script);
+        progressLine(100, QString("%1: failed — could not load the export script").arg(stem));
         markRow(dthjr::JobStatus::Failed, "could not load script");
         advanceRow();
         return;
     }
 
     // Plain execute, no arguments (v1.0.4+): which script the job row names IS
-    // the mode — the studio generates a dedicated bulk script.
+    // the mode — the studio generates a dedicated bulk script. The script
+    // appends the interior progress steps (ROM, exports, CSV delivery) to the
+    // progress log itself while this call blocks.
     log(QString("row %1/%2: running %3").arg(m_index + 1).arg(m_queue.size()).arg(job.scriptPath));
     markRow(dthjr::JobStatus::Running);
     const bool ok = script->execute(); // synchronous; returns when the ROM + export are done
     disposeScript(script);
     log(QString("row %1/%2: %3").arg(m_index + 1).arg(m_queue.size()).arg(ok ? "done" : "script reported failure"));
+    progressLine(100, ok ? QString("%1: done").arg(stem)
+                         : QString("%1: failed — the export script reported failure").arg(stem));
     markRow(ok ? dthjr::JobStatus::Done : dthjr::JobStatus::Failed,
             ok ? QString() : QString("script reported failure"));
 
@@ -515,6 +571,8 @@ void JobPoller::finishBatch()
         writeRunningFile();
         m_runningPath.clear();
     }
+    progressLine(100, "batch finished");
+    m_progressPath.clear();
     log("batch finished");
     m_queue.clear();
     m_index = 0;

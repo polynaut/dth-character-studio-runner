@@ -255,6 +255,12 @@ bool parseJob(Cursor &c, JsonJob &job)
             } else if (key == "scriptPath") {
                 if (!parseString(c, job.scriptPath))
                     return false;
+            } else if (key == "steps") {
+                double steps = 0;
+                if (!parseNumber(c, steps))
+                    return false;
+                // Bounded sane range; anything else reads as unknown (0).
+                job.steps = (steps >= 1 && steps <= 20) ? static_cast<int>(steps) : 0;
             } else if (key == "status") {
                 std::string status;
                 if (!parseString(c, status))
@@ -319,6 +325,7 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
     double version = 0;
     std::string type = "bulk-export"; // absent type reads as the default
     double progress = 0;
+    std::string progressLogPath;
     std::vector<JsonJob> jobs;
     bool sawJobs = false;
 
@@ -348,6 +355,11 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
             } else if (key == "progress") {
                 if (!parseNumber(c, progress)) {
                     result.error = "malformed progress";
+                    return result;
+                }
+            } else if (key == "progressLogPath") {
+                if (!parseString(c, progressLogPath)) {
+                    result.error = "malformed progressLogPath";
                     return result;
                 }
             } else if (key == "jobs") {
@@ -428,6 +440,7 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
         progress = 100;
     result.file.type = type;
     result.file.progress = static_cast<int>(progress);
+    result.file.progressLogPath = progressLogPath;
     result.file.jobs = jobs;
     result.ok = true;
     return result;
@@ -458,6 +471,13 @@ std::string writeJobJson(const JobFileModel &file)
     out += ",\n  \"jobsDone\": ";
     std::snprintf(buf, sizeof(buf), "%d", jobsDone);
     out += buf;
+    // Round-tripped so the running_ rewrite never loses it (transparency —
+    // the plugin itself keeps the path in memory).
+    if (!file.progressLogPath.empty()) {
+        out += ",\n  \"progressLogPath\": \"";
+        escapeInto(out, file.progressLogPath);
+        out += "\"";
+    }
     out += ",\n  \"jobs\": [";
     for (size_t i = 0; i < file.jobs.size(); ++i) {
         const JsonJob &job = file.jobs[i];
@@ -466,7 +486,13 @@ std::string writeJobJson(const JobFileModel &file)
         escapeInto(out, job.scenePath);
         out += "\",\n      \"scriptPath\": \"";
         escapeInto(out, job.scriptPath);
-        out += "\",\n      \"status\": \"";
+        out += "\"";
+        if (job.steps > 0) {
+            out += ",\n      \"steps\": ";
+            std::snprintf(buf, sizeof(buf), "%d", job.steps);
+            out += buf;
+        }
+        out += ",\n      \"status\": \"";
         out += statusToString(job.status);
         out += "\"";
         if (!job.error.empty()) {
@@ -477,6 +503,20 @@ std::string writeJobJson(const JobFileModel &file)
         out += "\n    }";
     }
     out += file.jobs.empty() ? "]\n}\n" : "\n  ]\n}\n";
+    return out;
+}
+
+std::string formatProgressLine(int percent, const std::string &message)
+{
+    if (percent < 0)
+        percent = 0;
+    if (percent > 100)
+        percent = 100;
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "[%d] ", percent);
+    std::string out = buf;
+    out += message;
+    out += '\n';
     return out;
 }
 

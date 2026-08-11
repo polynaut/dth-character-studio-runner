@@ -210,6 +210,53 @@ static void test_open_scene_round_trip_keeps_type()
     CHECK(r.file.jobs[0].status == JobStatus::Done);
 }
 
+static void test_progress_log_path_and_steps_round_trip()
+{
+    // v1.2.0: the optional verbose-progress fields — the top-level log path
+    // and each row's per-scene step count.
+    const JsonParseResult r = parseJobJson(
+        "{\n"
+        "  \"version\": 1,\n"
+        "  \"type\": \"bulk-export\",\n"
+        "  \"progress\": 0,\n"
+        "  \"progressLogPath\": \"C:\\\\Users\\\\x\\\\AppData\\\\Local\\\\dth\\\\export-progress.log\",\n"
+        "  \"jobs\": [\n"
+        "    { \"scenePath\": \"C:/P/Kira.duf\", \"scriptPath\": \"C:/L/.Bulk_ROM_Export.dsa\", \"steps\": 5 },\n"
+        "    { \"scenePath\": \"C:/P/Yoga.duf\", \"scriptPath\": \"C:/L/.Bulk_Export_Only.dsa\", \"steps\": 4 },\n"
+        "    { \"scenePath\": \"C:/P/Old.duf\", \"scriptPath\": \"C:/L/x.dsa\" }\n"
+        "  ]\n"
+        "}\n");
+    CHECK(r.ok);
+    CHECK(r.file.progressLogPath == "C:\\Users\\x\\AppData\\Local\\dth\\export-progress.log");
+    CHECK(r.file.jobs.size() == 3);
+    CHECK(r.file.jobs[0].steps == 5);
+    CHECK(r.file.jobs[1].steps == 4);
+    CHECK(r.file.jobs[2].steps == 0); // absent = unknown
+
+    // The running_ rewrite must not lose either field.
+    const std::string text = writeJobJson(r.file);
+    const JsonParseResult again = parseJobJson(text);
+    CHECK(again.ok);
+    CHECK(again.file.progressLogPath == r.file.progressLogPath);
+    CHECK(again.file.jobs[0].steps == 5);
+    CHECK(again.file.jobs[2].steps == 0);
+
+    // An out-of-range steps value reads as unknown, never garbage.
+    const JsonParseResult odd = parseJobJson(
+        "{\"version\":1,\"jobs\":[{\"scenePath\":\"a\",\"scriptPath\":\"b\",\"steps\":999}]}");
+    CHECK(odd.ok);
+    CHECK(odd.file.jobs[0].steps == 0);
+}
+
+static void test_progress_line_format()
+{
+    // The studio parses these lines — the format is the contract.
+    CHECK(dthjr::formatProgressLine(0, "Kira: opening scene") == "[0] Kira: opening scene\n");
+    CHECK(dthjr::formatProgressLine(20, "Kira: scene opened") == "[20] Kira: scene opened\n");
+    CHECK(dthjr::formatProgressLine(-5, "clamped") == "[0] clamped\n");
+    CHECK(dthjr::formatProgressLine(250, "clamped") == "[100] clamped\n");
+}
+
 int main()
 {
     test_happy_path();
@@ -222,6 +269,8 @@ int main()
     test_open_scene_batch();
     test_open_scene_invalid_shapes_are_foreign();
     test_open_scene_round_trip_keeps_type();
+    test_progress_log_path_and_steps_round_trip();
+    test_progress_line_format();
 
     if (g_failures == 0)
         std::printf("all json job-file tests passed\n");

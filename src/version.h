@@ -1,9 +1,9 @@
 #pragma once
 
 #define PLUGIN_MAJOR 1
-#define PLUGIN_MINOR 1
-#define PLUGIN_REV 4
-#define PLUGIN_BUILD 11
+#define PLUGIN_MINOR 2
+#define PLUGIN_REV 0
+#define PLUGIN_BUILD 12
 
 // Dotted string for the Windows VERSIONINFO resource (version.rc) — derived
 // from the numbers above so version.h stays the single source of truth.
