@@ -2,9 +2,9 @@
 
 A Daz Studio C++ plugin that runs [DTH Character Studio](https://github.com/polynaut/dth-character-studio)
 export batches unattended. The studio writes a small JSON job file; this
-plugin polls for it, renames it as the "started" signal, executes every row
-and keeps the file's progress current — no clicking through scenes and
-scripts by hand.
+plugin watches for it (real file watching since v1.3.0, with a fallback
+poll), renames it as the "started" signal, executes every row and keeps the
+file's progress current — no clicking through scenes and scripts by hand.
 
 The normative contract lives in the studio repo:
 `dth-character-studio/docs/exporter-plugin-job-file.md`. Summary (v2+v3):
@@ -28,7 +28,16 @@ The normative contract lives in the studio repo:
   steps to the same file on the same scale while `DzScript::execute()` runs.
   Without `progressLogPath` nothing is written; the whole-batch `progress`
   field in the job file keeps working regardless (older studios rely on it).
-- **Lifecycle:** poll (every 5 s, starting a few seconds after launch) →
+- **Pickup (v1.3.0):** a `QFileSystemWatcher` on every content dir's
+  `Scripts/DTH-Character-Studio/` makes the pickup near-instant (debounced a
+  beat — the studio writes temp-file-then-rename, so one handoff is a burst
+  of events). The classic poll stays underneath as the safety net: slow
+  (15 s) while the watches cover every existing scripts dir, the old 5 s
+  whenever they can't — a scripts dir that doesn't exist yet can't be watched
+  (the fallback tick re-syncs the watch list, so it arms when the dir
+  appears), and change notification on network shares is best-effort.
+- **Lifecycle:** notice the file (watch event or poll tick; the first check
+  starts a few seconds after launch) →
   **rename** to `running_dth_exporter_jobs.json` (the "started" signal — the
   studio can only abort an un-renamed file; a stale `running_` leftover is
   cleared first) → per row: open the scene with a no-save replace (or
@@ -38,8 +47,9 @@ The normative contract lives in the studio repo:
   script instead) → update the row's status + the whole-batch `progress` in
   the renamed file → next row. At the end the plugin writes `progress: 100`
   and LEAVES the file — the studio reads the outcome and deletes it. Per-row
-  failures are logged, marked `failed` (+ `error`) and skipped. Polling is
-  suspended while a batch runs.
+  failures are logged, marked `failed` (+ `error`) and skipped. Watching and
+  polling are suspended while a batch runs; the batch's end queues one
+  immediate re-check, so a handoff written mid-batch starts right away.
 - **`type: "open-scene"` (contract v3, v1.1.0+):** the same envelope carrying
   ONE script-less row — the studio's "Open in Daz" for an already-running
   instance (Daz drops forwarded command-line opens once a scene is loaded).
@@ -151,9 +161,10 @@ Daz Studio 4 plugins carry no prefix. The build sets this automatically.
 - `src/JsonJobFile.{h,cpp}` — pure C++17 reader/writer for the v2 JSON job
   file (hand-rolled: the DS4 build is Qt 4.8, no QJsonDocument), unit-tested
   in `tests/test_jsonjobfile.cpp`; same CI.
-- `src/JobPoller.{h,cpp}` — main-thread QTimer poll + queued-slot batch state
-  machine. All Daz API and `DzScript` calls stay on the main thread (a hard
-  SDK rule), which a main-thread timer gives us for free.
+- `src/JobPoller.{h,cpp}` — main-thread pickup (QFileSystemWatcher + fallback
+  QTimer) + queued-slot batch state machine. All Daz API and `DzScript` calls
+  stay on the main thread (a hard SDK rule), which main-thread Qt signal
+  delivery gives us for free.
 - `src/JobRunnerAction.{h,cpp}` — registered `DzAction`; its construction at
   startup is the plugin's startup hook, and it doubles as the manual trigger.
 - `src/pluginmain.cpp` — `DZ_PLUGIN_*` definition and class GUID.

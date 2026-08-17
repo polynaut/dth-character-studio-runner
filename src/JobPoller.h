@@ -1,11 +1,22 @@
 #pragma once
 
-// Main-thread poller + batch runner for the DTH exporter job file.
+// Main-thread watcher + batch runner for the DTH exporter job file.
 //
 // Every Daz API call (DzScript included) must happen on the main thread, so
-// the whole thing is a main-thread QObject driven by a QTimer — no worker
+// the whole thing is a main-thread QObject driven by Qt signals — no worker
 // threads, no marshalling. Batch steps hop through the event loop as queued
 // slots so the UI stays alive and Daz's own progress dialogs can paint.
+//
+// Pickup is REAL FILE WATCHING first (v1.3.0): a QFileSystemWatcher on every
+// content dir's Scripts/DTH-Character-Studio/ turns the studio's handoff
+// write into a near-instant pickup instead of a poll-interval wait. The
+// QTimer stays underneath as the safety net — change notification is
+// best-effort on network shares (a Daz library on a NAS is a real
+// deployment), and a scripts dir that doesn't exist yet can't be watched at
+// all — slowed way down while the watches cover every existing scripts dir,
+// back to the classic few-seconds poll while they don't. The fallback tick
+// doubles as the watch-list re-sync, so a dir created after startup (the
+// studio's first runtime install) gets its watch there.
 //
 // Contract v2 (JSON, dth_exporter_jobs.json): on pickup the file is RENAMED
 // to running_dth_exporter_jobs.json — the "started" signal (the studio can
@@ -29,6 +40,7 @@
 #include "JsonJobFile.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QList>
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -51,6 +63,9 @@ public slots:
 private slots:
     void beginPolling();
     void onPollTick();
+    // A watched scripts dir changed. Debounced into onPollTick: the studio
+    // writes temp-file-then-rename, so one handoff is a burst of events.
+    void onWatchedDirChanged(const QString &path);
     void stepOpenScene();
     void stepExecute();
     void stepOpenSceneOnly(); // the whole open-scene (contract v3) batch
@@ -95,11 +110,26 @@ private:
     // row) — how the progress log names the scene it is working.
     QString currentSceneStem() const;
 
+    // Bring m_watcher in line with the CURRENT content-dir mapping: add a
+    // watch for every existing Scripts/DTH-Character-Studio dir not yet
+    // watched (QFileSystemWatcher forgets deleted dirs on its own). Returns
+    // whether the watches cover every candidate that exists right now — what
+    // decides the fallback timer's pace. Watching a dir that later leaves the
+    // mapping is harmless: its events find no file and change nothing.
+    bool syncWatches();
+    // The batch is over — back to watching, plus one QUEUED immediate check:
+    // a job file written while the batch ran (watch events are dropped then)
+    // is picked up now, not a poll interval later.
+    void resumeWatching();
+
     enum State { Stopped, Polling, RunningBatch };
 
     State m_state;
     bool m_started;
     QTimer m_pollTimer;
+    QFileSystemWatcher m_watcher;
+    // Single-shot collapse of an event burst into ONE check.
+    QTimer m_watchDebounce;
     QList<Job> m_queue;
     int m_index;
 

@@ -23,7 +23,16 @@
 namespace {
 
 const int kStartupDelayMs = 3000; // content-dir mapping may not be ready at plugin init
+// The fallback poll's two paces. FAST while the file watches don't cover
+// every existing scripts dir (none may exist yet — the studio creates them —
+// and a failed addPath must not cost pickup latency): the poll then IS the
+// pickup, exactly like pre-1.3.0. SLOW once they do: the watch is the pickup
+// and the poll only papers over events a network share may swallow.
 const int kPollIntervalMs = 5000;
+const int kWatchedPollIntervalMs = 15000;
+// One handoff is a BURST of directory events (the studio writes a temp file
+// and renames it) — collapse them into one check.
+const int kWatchDebounceMs = 250;
 const int kSettleMs = 500;        // event-loop drain between scene open and script run
 
 // Contract v2 (JSON, renamed on pickup) + the legacy v1 CSV.
@@ -72,6 +81,12 @@ JobPoller::JobPoller()
 {
     m_pollTimer.setInterval(kPollIntervalMs);
     connect(&m_pollTimer, SIGNAL(timeout()), this, SLOT(onPollTick()));
+    // Real file watching (v1.3.0): a changed scripts dir funnels through the
+    // single-shot debounce into the same onPollTick every pickup path shares.
+    m_watchDebounce.setSingleShot(true);
+    m_watchDebounce.setInterval(kWatchDebounceMs);
+    connect(&m_watchDebounce, SIGNAL(timeout()), this, SLOT(onPollTick()));
+    connect(&m_watcher, SIGNAL(directoryChanged(QString)), this, SLOT(onWatchedDirChanged(QString)));
 }
 
 void JobPoller::log(const QString &message)
@@ -92,9 +107,8 @@ void JobPoller::beginPolling()
 {
     m_state = Polling;
     m_pollTimer.start();
-    log(QString("watching content directories for %1 (every %2 s)")
-            .arg(QString(kJobFileRelPath))
-            .arg(kPollIntervalMs / 1000));
+    log(QString("watching content directories for %1 (file watching + fallback poll)")
+            .arg(QString(kJobFileRelPath)));
     onPollTick();
 }
 
@@ -113,12 +127,64 @@ void JobPoller::checkNow()
     onPollTick();
 }
 
+void JobPoller::resumeWatching()
+{
+    m_state = Polling;
+    m_pollTimer.start();
+    // A handoff written while the batch ran was invisible (watch events are
+    // dropped mid-batch): check NOW, queued so the current call stack — and
+    // Daz's own deferred post-batch work — unwinds first. Pre-1.3.0 this
+    // waited for the next poll tick.
+    QMetaObject::invokeMethod(this, "onPollTick", Qt::QueuedConnection);
+}
+
 void JobPoller::rememberIgnored(const QString &path)
 {
     const QFileInfo info(path);
     m_ignoredPath = path;
     m_ignoredSize = info.size();
     m_ignoredMtime = info.lastModified();
+}
+
+void JobPoller::onWatchedDirChanged(const QString &path)
+{
+    Q_UNUSED(path)
+    // Events during a batch are dropped on purpose (one batch at a time; the
+    // batch's own rewrites fire this constantly) — resumeWatching()'s queued
+    // check picks up anything that landed meanwhile.
+    if (m_state != Polling)
+        return;
+    // (Re)start: a burst keeps pushing the shot out; the last event wins.
+    m_watchDebounce.start();
+}
+
+bool JobPoller::syncWatches()
+{
+    DzContentMgr *mgr = dzApp ? dzApp->getContentMgr() : NULL;
+    if (!mgr)
+        return false;
+    bool allCovered = false;
+    for (int i = 0; i < mgr->getNumContentDirectories(); ++i) {
+        const QString dir = mgr->getContentDirectoryPath(i)
+            + "/Scripts/DTH-Character-Studio";
+        if (!QFileInfo(dir).isDir())
+            continue; // nothing to watch yet — the fallback poll covers it
+        if (m_watcher.directories().contains(dir)) {
+            allCovered = true;
+            continue;
+        }
+        // Qt 4.8's addPath returns void (Qt 5+ returns bool) — verify via the
+        // list instead, the one spelling both SDK builds share.
+        m_watcher.addPath(dir);
+        if (m_watcher.directories().contains(dir)) {
+            allCovered = true;
+            log(QString("file watch armed on %1").arg(dir));
+        } else {
+            log(QString("could not watch %1 — the fallback poll covers it").arg(dir));
+            return false;
+        }
+    }
+    return allCovered;
 }
 
 void JobPoller::onPollTick()
@@ -129,6 +195,13 @@ void JobPoller::onPollTick()
     DzContentMgr *mgr = dzApp ? dzApp->getContentMgr() : NULL;
     if (!mgr)
         return;
+
+    // Keep the watches in step with the mapping (dirs appear after installs,
+    // watchers forget deleted dirs), and pace the fallback poll by whether
+    // they cover everything that exists.
+    const int wanted = syncWatches() ? kWatchedPollIntervalMs : kPollIntervalMs;
+    if (m_pollTimer.interval() != wanted)
+        m_pollTimer.setInterval(wanted);
 
     // Contract v2 (JSON) first, the legacy CSV as fallback — first mapped
     // content directory wins for each.
@@ -316,8 +389,7 @@ void JobPoller::cancelBatch(const QString &reason)
     }
     m_queue.clear();
     m_index = 0;
-    m_state = Polling;
-    m_pollTimer.start();
+    resumeWatching();
 }
 
 void JobPoller::stepOpenSceneOnly()
@@ -359,8 +431,7 @@ void JobPoller::stepOpenSceneOnly()
     // Deliberately NO newEmptyScene(): the loaded scene is the whole point.
     m_queue.clear();
     m_index = 0;
-    m_state = Polling;
-    m_pollTimer.start();
+    resumeWatching();
 }
 
 bool JobPoller::pickUpLegacyCsvJobFile(const QString &path)
@@ -576,8 +647,7 @@ void JobPoller::finishBatch()
     log("batch finished");
     m_queue.clear();
     m_index = 0;
-    m_state = Polling;
-    m_pollTimer.start();
+    resumeWatching();
 }
 
 void JobPoller::newEmptyScene()
