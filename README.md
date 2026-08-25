@@ -7,7 +7,7 @@ poll), renames it as the "started" signal, executes every row and keeps the
 file's progress current — no clicking through scenes and scripts by hand.
 
 The normative contract lives in the studio repo:
-`dth-character-studio/docs/exporter-plugin-job-file.md`. Summary (v2+v3):
+`dth-character-studio/docs/exporter-plugin-job-file.md`. Summary (v2+v3+v4):
 
 - **Job file:** `dth_exporter_jobs.json` directly inside
   `<content dir>/Scripts/DTH-Character-Studio/`. The plugin probes **every
@@ -60,6 +60,18 @@ The normative contract lives in the studio repo:
   is foreign. Since v1.1.4 the freshly loaded scene is also marked **unmodified**
   (`DzScene::assetSaved()`): Daz flags a just-loaded scene as needing a save, so
   closing it asked to save changes nobody had made.
+- **`sessionPerRow: true` (contract v4, v1.4.0+):** the studio asks for a
+  FRESH Daz session per row — Daz's follower re-evaluation silently degrades
+  after a scene re-load inside one session (measured; the contract doc carries
+  the data), and only session hygiene prevents it. The plugin then runs ONE
+  unworked row per session: after marking the row it renames the claimed file
+  BACK to the pending name (statuses kept) while unworked rows remain, and
+  quits Daz — the studio's export supervisor launches the next session, whose
+  Runner claims the file again and resumes at the next unworked row. A WORN
+  session (a batch row already ran in it, or a scene is loaded — the user's
+  Daz) refuses the batch without claiming it: Save Changes guard, empty scene,
+  quit; the studio starts a fresh Daz that claims it. Older plugins ignore the
+  field and run the whole batch in one session.
 - **Legacy:** the old `dth_exporter_jobs.csv` (contract v1) keeps its
   parse → delete-as-ack → run lifecycle for older studio versions.
 - **Never saves a scene.** The ROM keyframes a script creates are throwaway

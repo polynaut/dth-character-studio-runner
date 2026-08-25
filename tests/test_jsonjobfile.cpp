@@ -248,6 +248,42 @@ static void test_progress_log_path_and_steps_round_trip()
     CHECK(odd.file.jobs[0].steps == 0);
 }
 
+static void test_session_per_row_round_trip()
+{
+    // Contract v4: the fresh-session flag parses, defaults to false, and
+    // round-trips the writer (a hand-back and every running_ rewrite must
+    // keep asking for fresh sessions).
+    const JsonParseResult flagged = parseJobJson(
+        "{\"version\":1,\"type\":\"bulk-export\",\"progress\":0,"
+        "\"sessionPerRow\":true,"
+        "\"jobs\":[{\"scenePath\":\"a\",\"scriptPath\":\"b\"}]}");
+    CHECK(flagged.ok);
+    CHECK(flagged.file.sessionPerRow);
+    const std::string rewritten = writeJobJson(flagged.file);
+    CHECK(rewritten.find("\"sessionPerRow\": true") != std::string::npos);
+    const JsonParseResult again = parseJobJson(rewritten);
+    CHECK(again.ok);
+    CHECK(again.file.sessionPerRow);
+
+    // Absent (or explicit false) reads false — and the writer then omits it,
+    // keeping pre-v4 batches byte-identical to what older plugins wrote.
+    const JsonParseResult plain = parseJobJson(
+        "{\"version\":1,\"jobs\":[{\"scenePath\":\"a\",\"scriptPath\":\"b\"}]}");
+    CHECK(plain.ok);
+    CHECK(!plain.file.sessionPerRow);
+    CHECK(writeJobJson(plain.file).find("sessionPerRow") == std::string::npos);
+    const JsonParseResult off = parseJobJson(
+        "{\"version\":1,\"sessionPerRow\":false,"
+        "\"jobs\":[{\"scenePath\":\"a\",\"scriptPath\":\"b\"}]}");
+    CHECK(off.ok);
+    CHECK(!off.file.sessionPerRow);
+
+    // A malformed value is a malformed file, like every other known key.
+    const JsonParseResult bad = parseJobJson(
+        "{\"version\":1,\"sessionPerRow\":\"yes\",\"jobs\":[]}");
+    CHECK(!bad.ok);
+}
+
 static void test_progress_line_format()
 {
     // The studio parses these lines — the format is the contract.
@@ -270,6 +306,7 @@ int main()
     test_open_scene_invalid_shapes_are_foreign();
     test_open_scene_round_trip_keeps_type();
     test_progress_log_path_and_steps_round_trip();
+    test_session_per_row_round_trip();
     test_progress_line_format();
 
     if (g_failures == 0)

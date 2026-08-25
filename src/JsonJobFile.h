@@ -57,6 +57,15 @@ struct JobFileModel {
     std::string type = "bulk-export"; // "bulk-export" | "open-scene" (validated)
     int progress = 0;       // whole-batch 0..100, plugin-owned after pickup
     std::string progressLogPath; // v1.2.0 (optional): the verbose progress log
+    // Contract v4 (v1.4.0, optional): the studio asks for a FRESH Daz session
+    // per row. The plugin then runs ONE pending row per session: after marking
+    // the row it renames the claimed file BACK to the pending name (statuses
+    // kept) while unworked rows remain, and quits Daz — the studio's export
+    // supervisor launches the next session. A worn session (a batch row
+    // already ran in it, or a scene is/was loaded) refuses the batch without
+    // claiming it and quits. Round-tripped by the writer so a hand-back and
+    // every running_ rewrite keep the field.
+    bool sessionPerRow = false;
     std::vector<JsonJob> jobs;
 };
 
