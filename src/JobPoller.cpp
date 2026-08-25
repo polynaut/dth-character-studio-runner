@@ -758,8 +758,17 @@ void JobPoller::handBackAndQuit()
         if (!remains) {
             // Last row done: the normal contract finish — progress 100, file
             // LEFT under the running_ name for the studio to sweep + report.
-            m_model.progress = 100;
-            writeRunningFile();
+            // Usually markRow already wrote exactly that (the last row's mark
+            // drives progress to 100), and rewriting would RECREATE the file
+            // after a fast studio watch has swept it — the newEmptyScene
+            // above takes seconds on a big scene, and the sweep was measured
+            // landing inside that gap. Write only when the file doesn't
+            // already say finished (the resumed-batch anomaly where no row
+            // ran this session).
+            if (m_model.progress != 100) {
+                m_model.progress = 100;
+                writeRunningFile();
+            }
             progressLine(100, "batch finished");
             log("fresh-session batch finished");
         } else {
