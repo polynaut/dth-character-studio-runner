@@ -260,12 +260,20 @@ bool JobPoller::pickUpJsonJobFile(const QString &path)
     // existing unsaved-changes cancellation).
     if (parsed.file.type == "bulk-export" && parsed.file.sessionPerRow && sessionWorn()) {
         log("fresh-session batch found, but this Daz session is worn — quitting so a fresh session can run it");
+        // The Save Changes guard runs a NESTED event loop (QMessageBox::exec),
+        // and this branch is reached with m_state == Polling — so poll ticks
+        // and watch events kept firing INSIDE the prompt and stacked a second
+        // refusal dialog on top of the first (measured on the first live worn
+        // run). Borrow the batch state for the duration: every pickup path is
+        // gated on Polling.
+        m_state = RunningBatch;
         if (!ensureSceneSafeToReplace()) {
             if (QFile::remove(path))
                 log("batch cancelled — unsaved changes in the open scene");
             else
                 log(QString("could not delete the cancelled job file %1").arg(path));
             rememberIgnored(path);
+            m_state = Polling; // stay alive — the user kept their session
             return false;
         }
         newEmptyScene();
