@@ -87,6 +87,18 @@ private:
     void advanceRow();
     void finishBatch();
     void newEmptyScene();
+    // --- Fresh-session-per-row (contract v4, v1.4.0) ---
+    // Whether THIS Daz session may run a sessionPerRow row: only a session
+    // that has run no batch row and holds no (never held a) scene is fresh —
+    // Daz's follower re-evaluation silently degrades after a scene re-load in
+    // one session (measured; the studio-side contract doc carries the data).
+    bool sessionWorn() const;
+    // The sessionPerRow row is marked: hand the batch back under the PENDING
+    // name while unworked rows remain (else write progress 100), then quit.
+    void handBackAndQuit();
+    // Stop watching/polling and ask Daz to exit — the studio's supervisor
+    // starts the next session (and kills this one if the exit hangs).
+    void quitDaz();
     // The user's-scene guard: prompt (Daz-style Save Changes) when the OPEN
     // scene has unsaved changes before the batch replaces it. False = cancel.
     bool ensureSceneSafeToReplace();
@@ -126,6 +138,13 @@ private:
 
     State m_state;
     bool m_started;
+    // A batch row ran (or a scene was loaded) in this Daz session — the wear
+    // signal sessionWorn() folds with the live-scene probe.
+    bool m_sessionUsed;
+    // The next stepOpenScene is the batch's first row — what arms the
+    // Save Changes guard (a sessionPerRow batch resumes at an arbitrary row
+    // index, so "index 0" stopped meaning "first row").
+    bool m_firstRowOfBatch;
     QTimer m_pollTimer;
     QFileSystemWatcher m_watcher;
     // Single-shot collapse of an event burst into ONE check.

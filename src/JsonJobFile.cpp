@@ -326,6 +326,7 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
     std::string type = "bulk-export"; // absent type reads as the default
     double progress = 0;
     std::string progressLogPath;
+    bool sessionPerRow = false;
     std::vector<JsonJob> jobs;
     bool sawJobs = false;
 
@@ -360,6 +361,16 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
             } else if (key == "progressLogPath") {
                 if (!parseString(c, progressLogPath)) {
                     result.error = "malformed progressLogPath";
+                    return result;
+                }
+            } else if (key == "sessionPerRow") {
+                skipWs(c);
+                if (skipLiteral(c, "true")) {
+                    sessionPerRow = true;
+                } else if (skipLiteral(c, "false")) {
+                    sessionPerRow = false;
+                } else {
+                    result.error = "malformed sessionPerRow";
                     return result;
                 }
             } else if (key == "jobs") {
@@ -441,6 +452,7 @@ JsonParseResult parseJobJson(std::string_view utf8Text)
     result.file.type = type;
     result.file.progress = static_cast<int>(progress);
     result.file.progressLogPath = progressLogPath;
+    result.file.sessionPerRow = sessionPerRow;
     result.file.jobs = jobs;
     result.ok = true;
     return result;
@@ -478,6 +490,10 @@ std::string writeJobJson(const JobFileModel &file)
         escapeInto(out, file.progressLogPath);
         out += "\"";
     }
+    // Contract v4: round-tripped (only when set) so the hand-back to the
+    // pending name and every running_ rewrite keep asking for fresh sessions.
+    if (file.sessionPerRow)
+        out += ",\n  \"sessionPerRow\": true";
     out += ",\n  \"jobs\": [";
     for (size_t i = 0; i < file.jobs.size(); ++i) {
         const JsonJob &job = file.jobs[i];

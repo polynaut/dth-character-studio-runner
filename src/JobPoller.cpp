@@ -37,6 +37,7 @@ const int kSettleMs = 500;        // event-loop drain between scene open and scr
 
 // Contract v2 (JSON, renamed on pickup) + the legacy v1 CSV.
 const char *const kJobFileRelPath = "/Scripts/DTH-Character-Studio/dth_exporter_jobs.json";
+const char *const kPendingJobFileName = "dth_exporter_jobs.json";
 const char *const kRunningJobFileName = "running_dth_exporter_jobs.json";
 const char *const kLegacyJobFileRelPath = "/Scripts/DTH-Character-Studio/dth_exporter_jobs.csv";
 const char *const kLogPrefix = "[DTH Character Studio Runner] ";
@@ -76,6 +77,8 @@ JobPoller &JobPoller::instance()
 JobPoller::JobPoller()
     : m_state(Stopped)
     , m_started(false)
+    , m_sessionUsed(false)
+    , m_firstRowOfBatch(false)
     , m_index(0)
     , m_ignoredSize(-1)
 {
@@ -246,6 +249,38 @@ bool JobPoller::pickUpJsonJobFile(const QString &path)
         return false;
     }
 
+    // Contract v4: a fresh-session batch may only run in a FRESH session —
+    // Daz's follower re-evaluation silently degrades after a scene load in
+    // this session (measured; the studio's contract doc carries the data). A
+    // worn session refuses WITHOUT claiming: the file stays pending, this Daz
+    // quits, and the studio's wait-for-close flow (or its export supervisor)
+    // starts a fresh one that will claim it. The user's open scene gets the
+    // same Save Changes guard the batch's first row would have given it —
+    // Cancel cancels the batch (the pending file is deleted, like the
+    // existing unsaved-changes cancellation).
+    if (parsed.file.type == "bulk-export" && parsed.file.sessionPerRow && sessionWorn()) {
+        log("fresh-session batch found, but this Daz session is worn — quitting so a fresh session can run it");
+        // The Save Changes guard runs a NESTED event loop (QMessageBox::exec),
+        // and this branch is reached with m_state == Polling — so poll ticks
+        // and watch events kept firing INSIDE the prompt and stacked a second
+        // refusal dialog on top of the first (measured on the first live worn
+        // run). Borrow the batch state for the duration: every pickup path is
+        // gated on Polling.
+        m_state = RunningBatch;
+        if (!ensureSceneSafeToReplace()) {
+            if (QFile::remove(path))
+                log("batch cancelled — unsaved changes in the open scene");
+            else
+                log(QString("could not delete the cancelled job file %1").arg(path));
+            rememberIgnored(path);
+            m_state = Polling; // stay alive — the user kept their session
+            return false;
+        }
+        newEmptyScene();
+        quitDaz();
+        return false;
+    }
+
     // The RENAME is the "started" signal — the studio can abort (delete) an
     // un-renamed file, never a renamed one. A stale running_ file (an old
     // finished batch nobody cleaned up) would block the rename: remove it.
@@ -292,6 +327,7 @@ bool JobPoller::pickUpJsonJobFile(const QString &path)
         // rename/progress bookkeeping, different ending: the scene stays).
         m_pollTimer.stop();
         m_state = RunningBatch;
+        m_sessionUsed = true; // an open-scene handoff loads a scene — wear
         m_queue.clear();
         Job job;
         job.scenePath = QString::fromStdString(parsed.file.jobs[0].scenePath);
@@ -527,21 +563,46 @@ void JobPoller::beginBatch(const QList<Job> &jobs)
 {
     m_pollTimer.stop();
     m_state = RunningBatch;
+    m_sessionUsed = true; // every batch loads scenes — this session is spent
+    m_firstRowOfBatch = true;
     m_queue = jobs;
     m_index = 0;
-    log(QString("starting batch of %1 job(s)").arg(m_queue.size()));
+    if (m_model.sessionPerRow) {
+        // One row per session, and a resumed batch carries rows earlier
+        // sessions already worked: start at the FIRST unworked row. (The
+        // queue and m_model.jobs are index-aligned by construction.)
+        while (m_index < m_queue.size()
+               && static_cast<size_t>(m_index) < m_model.jobs.size()
+               && (m_model.jobs[static_cast<size_t>(m_index)].status == dthjr::JobStatus::Done
+                   || m_model.jobs[static_cast<size_t>(m_index)].status == dthjr::JobStatus::Failed))
+            ++m_index;
+        if (m_index >= m_queue.size()) {
+            // Nothing left to run (a hand-back anomaly): finish at 100 so the
+            // studio reports the outcome, and quit like any fresh-session row.
+            log("fresh-session batch has no unworked rows — finishing it");
+            handBackAndQuit();
+            return;
+        }
+        log(QString("fresh-session batch: running row %1/%2 in this session")
+                .arg(m_index + 1).arg(m_queue.size()));
+    } else {
+        log(QString("starting batch of %1 job(s)").arg(m_queue.size()));
+    }
     QMetaObject::invokeMethod(this, "stepOpenScene", Qt::QueuedConnection);
 }
 
 void JobPoller::stepOpenScene()
 {
-    // Row 0 replaces the USER'S open scene (later rows replace the previous
-    // row's throwaway ROM keyframes — nothing worth prompting for): a dirty
-    // scene gets Daz's Save Changes choice first; Cancel cancels the batch.
-    if (m_index == 0 && !ensureSceneSafeToReplace()) {
+    // The batch's FIRST row replaces the USER'S open scene (later rows replace
+    // the previous row's throwaway ROM keyframes — nothing worth prompting
+    // for): a dirty scene gets Daz's Save Changes choice first; Cancel cancels
+    // the batch. Tracked as a flag, not "index 0": a fresh-session batch
+    // resumes at whatever row the previous session left off.
+    if (m_firstRowOfBatch && !ensureSceneSafeToReplace()) {
         cancelBatch("cancelled — unsaved changes in the open scene");
         return;
     }
+    m_firstRowOfBatch = false;
     const Job &job = m_queue.at(m_index);
     const QString stem = currentSceneStem();
     progressLine(0, QString("%1: opening scene").arg(stem));
@@ -623,6 +684,13 @@ void JobPoller::stepExecute()
 
 void JobPoller::advanceRow()
 {
+    if (m_model.sessionPerRow) {
+        // Contract v4: one row per session. The row just got marked — hand
+        // the batch back (or finish it) and quit; the studio's supervisor
+        // starts the next session for whatever remains.
+        handBackAndQuit();
+        return;
+    }
     ++m_index;
     if (m_index < m_queue.size())
         QMetaObject::invokeMethod(this, "stepOpenScene", Qt::QueuedConnection);
@@ -656,4 +724,99 @@ void JobPoller::newEmptyScene()
     // drops the batch's throwaway ROM keyframes so quitting Daz never prompts
     // to save them (verified by the end-to-end smoke test).
     dzScene->clear();
+}
+
+bool JobPoller::sessionWorn() const
+{
+    if (m_sessionUsed)
+        return true;
+    // A scene in (or ever loaded into) this session is wear even when this
+    // plugin never touched it — the user's own session counts. A scene that
+    // was loaded and closed again leaves no trace here; the studio-side
+    // motion-summary gate is the net under that residual case. No scene
+    // object at all = can't tell = worn (quitting for a fresh session is
+    // cheap; a degraded export is not).
+    if (!dzScene)
+        return true;
+    if (!dzScene->getFilename().isEmpty())
+        return true;
+    return dzScene->getNumNodes() > 0;
+}
+
+void JobPoller::handBackAndQuit()
+{
+    // The row's scene holds throwaway ROM keyframes — discard them BEFORE the
+    // quit so Daz never prompts to save them on its way out.
+    newEmptyScene();
+    bool remains = false;
+    for (size_t i = 0; i < m_model.jobs.size(); ++i) {
+        if (m_model.jobs[i].status == dthjr::JobStatus::Pending
+            || m_model.jobs[i].status == dthjr::JobStatus::Running)
+            remains = true;
+    }
+    if (!m_runningPath.isEmpty()) {
+        if (!remains) {
+            // Last row done: the normal contract finish — progress 100, file
+            // LEFT under the running_ name for the studio to sweep + report.
+            // Usually markRow already wrote exactly that (the last row's mark
+            // drives progress to 100), and rewriting would RECREATE the file
+            // after a fast studio watch has swept it — the newEmptyScene
+            // above takes seconds on a big scene, and the sweep was measured
+            // landing inside that gap. Write only when the file doesn't
+            // already say finished (the resumed-batch anomaly where no row
+            // ran this session).
+            if (m_model.progress != 100) {
+                m_model.progress = 100;
+                writeRunningFile();
+            }
+            progressLine(100, "batch finished");
+            log("fresh-session batch finished");
+        } else {
+            // Unworked rows remain: write the current statuses, then hand the
+            // file back under the PENDING name — the studio's supervisor
+            // launches the next fresh session and that session's Runner
+            // claims it again, resuming at the first unworked row.
+            writeRunningFile();
+            const QString pendingPath =
+                QFileInfo(m_runningPath).absolutePath() + "/" + kPendingJobFileName;
+            // A pending file here would be litter (every studio-side writer
+            // refuses while a live batch exists) — last write wins.
+            if (QFile::exists(pendingPath) && !QFile::remove(pendingPath))
+                log(QString("could not clear a stray pending job file %1").arg(pendingPath));
+            if (QFile::rename(m_runningPath, pendingPath))
+                log("row done — batch handed back for the next fresh session");
+            else
+                log(QString("could not hand the batch back to %1 — the studio's supervisor will recover it").arg(pendingPath));
+        }
+        m_runningPath.clear();
+    }
+    m_progressPath.clear();
+    m_queue.clear();
+    m_index = 0;
+    quitDaz();
+}
+
+void JobPoller::quitDaz()
+{
+    // Stop noticing job files first: a poll tick during shutdown must not
+    // pick anything up (the claim would die with the process).
+    m_state = Stopped;
+    m_pollTimer.stop();
+    m_watchDebounce.stop();
+    log("quitting Daz Studio (fresh-session-per-row)");
+#if DAZ_SDK_MAJOR_VERSION >= 6
+    if (dzApp) {
+        dzApp->delayedExit(0);
+        return;
+    }
+#endif
+    // DS4 has no delayedExit — closing the main window is the user-action
+    // equivalent (the scene was reset, so no save prompt can appear). Queued,
+    // so the current batch step unwinds first.
+    DzMainWindow *win = dzApp ? dzApp->getInterface() : NULL;
+    if (win) {
+        QMetaObject::invokeMethod(win, "close", Qt::QueuedConnection);
+        return;
+    }
+    log("could not quit Daz Studio (no main window) — the studio's supervisor will time this session out");
 }
